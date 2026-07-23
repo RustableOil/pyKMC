@@ -65,11 +65,12 @@ class DetectorThreshold(Detector):
                 df_reference_table["event_id"] == pds_generic_event_forward["id_final"]
             ]
 
-            # Should always have one (reversibility)
+            # The landing environment is physically reversible, but the reference
+            # table is a growing/pruned catalog, not a complete map: it may not yet
+            # (or no longer) hold an event search starting from that environment.
+            # Without a known backward barrier there's no evidence of a basin.
             if df_backward_events.empty:
-                raise ValueError(
-                    "Basin detection: No backward event for the selected active event."
-                )
+                return False
 
             # Check if at least one backward event has a low energy barrier
             dE_backward = df_backward_events["energy_barrier"].min()
