@@ -285,7 +285,12 @@ class KMC:
                     "log",
                     "\t :=> Removing reference event from which reconstruction failed.",
                 )
-                self.reference_table.remove(list(set(err_reference)))
+                selected_num_ref = active_table.table.loc[idx_selected_event].at[
+                    "num_reference_event"
+                ]
+                self.reference_table.remove(
+                    list(set(err_reference)), protect={selected_num_ref}
+                )
                 self.loggers.info(
                     "log",
                     "\t :=> Removing topology from known environments from which reconstruction failed.",

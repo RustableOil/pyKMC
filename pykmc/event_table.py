@@ -619,13 +619,17 @@ class ReferenceEventTable:
                 }
             )
 
-    def remove(self, idx_refs: list[int]) -> None:
+    def remove(self, idx_refs: list[int], protect: set[int] | None = None) -> None:
         """Remove events with ind == idx_ref as well as its backward event
 
         Parameters
         ----------
         ind : int
             index of the event to be removed
+        protect : set[int] | None, optional
+            idx_ref values to keep even if swept in as a backward counterpart
+            of one of `idx_refs` (e.g. the reference event backing the active
+            event just selected/reconstructed this step), by default None.
         """
 
         idx_refs = set(idx_refs)  # make a set if there are doublons
@@ -636,7 +640,7 @@ class ReferenceEventTable:
             )
         )  # find set idx backwards
 
-        all_refs = idx_refs | backward_refs  # all ref to remove
+        all_refs = (idx_refs | backward_refs) - (protect or set())  # all ref to remove
 
         self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(
             drop=True
