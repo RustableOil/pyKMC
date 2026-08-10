@@ -748,6 +748,34 @@
   
   
     <li class="md-nav__item">
+      <a href="dev_parallelization_manager.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manager and Parallelization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="dev_code_formatting.html" class="md-nav__link">
         
   
@@ -1713,6 +1741,13 @@
   </details></p>
 </li>
 <li>
+<p><strong><code>group_size</code></strong> : <code>int</code>, default = <code>-1</code>
+<br />
+<details><summary>Description</summary>
+  Number of MPI worker ranks in the group communicator (replaces old global mode). -1 means all worker ranks.
+  </details></p>
+</li>
+<li>
 <p><strong><code>engine_use_rank_0</code></strong> : <code>bool</code>, default = <code>False</code>
 <br />
 <details><summary>Description</summary>
@@ -1759,6 +1794,13 @@
 <br />
 <details><summary>Description</summary>
   Enable event selection bias. Requires a [Bias] section.
+  </details></p>
+</li>
+<li>
+<p><strong><code>max_physical_time</code></strong> : <code>float</code>, optional
+<br />
+<details><summary>Description</summary>
+  Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit).
   </details>
 </p>
 </li>
@@ -1980,6 +2022,13 @@
 <br />
 <details><summary>Description</summary>
   Lammps minimize command with frozen core
+  </details></p>
+</li>
+<li>
+<p><strong><code>verbosity</code></strong> : <code>int</code>, optional
+<br />
+<details><summary>Description</summary>
+  LAMMPS log verbosity. None inherits control.verbosity. 0 disables log file.
   </details>
 </p>
 </li>
@@ -2180,7 +2229,7 @@
 <p><strong><code>r_delr_sad_thr</code></strong> : <code>float</code>, default = <code>0.4</code>
 <br />
 <details><summary>Description</summary>
-  When a saddle point is found by pARTn, we compare artn delr_sad to this threshold to check if the system went back to the minimum. If yes, new attempt.
+  Acceptance threshold (in Angstrom) for a refined saddle point. A refinement run starts from the expected saddle position, and artn delr_sad measures how far the converged saddle has moved from that starting configuration. If delr_sad is strictly below this threshold (delr_sad < r_delr_sad_thr), the refined saddle stayed close to the expected saddle and is accepted; otherwise (e.g. the search fell back to the minimum), a new attempt is made, up to r_max_attempts.
   </details></p>
 </li>
 <li>
