@@ -380,6 +380,7 @@ class KMC:
                         self.system.update_positions(
                             result_reconstruction.ok_value().min2_positions
                         )
+                        self.total_energy = result_reconstruction.ok_value().min2_etot
                 else:
                     self.loggers.info(
                         "log",
@@ -390,6 +391,7 @@ class KMC:
                     self.system.update_positions(
                         result_reconstruction.ok_value().min2_positions
                     )
+                    self.total_energy = result_reconstruction.ok_value().min2_etot
                 if basin.connectivity_table is not None:
                     basin.connectivity_table.save(
                         "basin_connectivity_" + str(step) + ".pickle"
