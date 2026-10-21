@@ -85,6 +85,14 @@ def reset(engine, config, cell) -> None:
     initialize_potential(engine, config)
 
 
+def set_masses(engine, map_type) -> None:
+    """
+    Set per-type masses after a reset; potentials such as sw or mlip do not set them
+    """
+    for e in map_type.values():
+        engine.command("mass {} {}".format(e["ref"], e["mass"]))
+
+
 def clear(engine):
     """
     Clears lammps instance
@@ -128,6 +136,7 @@ def partn_search_AV(
 
     av_type = type[atom_map]
 
+    set_masses(engine, map_type)
     redefine_atoms(engine, av_positions, av_type)
     make_AV(engine, av_idx, buffer_idx)
     return atom_map, np.array(np.where(atom_map == central_atom_idx)[0] + 1)
@@ -166,6 +175,7 @@ def partn_refine_AV(
 
     av_type = type[atom_map]
 
+    set_masses(engine, map_type)
     redefine_atoms(engine, av_positions, av_type)
     make_AV(engine, av_idx, buffer_idx)
 
