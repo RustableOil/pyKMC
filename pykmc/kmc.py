@@ -328,6 +328,13 @@ class KMC:
                     result_reconstruction.ok_value().min1_positions
                 )
                 result_basin = basin.execute(self.system)
+                if basin.n_psr_skipped > 0:
+                    self.loggers.info(
+                        "log",
+                        "\t :=> Basin skipped {} transitions with a failed PSR match.".format(
+                            basin.n_psr_skipped
+                        ),
+                    )
                 if result_basin.is_ok():  # Basin did no fail
                     # move system to a state connected to the exit_state
                     self.system.update_positions(
