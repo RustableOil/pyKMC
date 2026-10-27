@@ -142,10 +142,27 @@ class PointSetRegistration:
         nat1 = len(coords1)
         kmax_factor = self.config.ira.kmax_factor
 
+        # Anchor IRA on the central atoms. The default anchor (geometric centre) is
+        # ambiguous for environments nearly symmetric around it (e.g. a split
+        # dumbbell) and can converge to a wrong alignment with a large score.
+        candidate1 = candidate2 = None
+        is_central = np.asarray(neighbor_list) == central_atom_index
+        if "move_atom_idx" in self.dfevent.index and is_central.any():
+            candidate1 = int(np.flatnonzero(is_central)[0])
+            candidate2 = int(self.dfevent.at["move_atom_idx"])
+
         # Run ira to find transformation matrices
         try:
             rmat, tr, perm, dh = ira.match(
-                nat1, typ1, coords1, nat2, typ2, coords2, kmax_factor
+                nat1,
+                typ1,
+                coords1,
+                nat2,
+                typ2,
+                coords2,
+                kmax_factor,
+                candidate1=candidate1,
+                candidate2=candidate2,
             )
 
             return Ok(
