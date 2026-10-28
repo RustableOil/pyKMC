@@ -167,6 +167,8 @@ class KMC:
             restart_info = np.load(self.config.control.restart_file)
             last_step = restart_info["last_step"]
             total_time = restart_info["last_time"]
+            # Shift the logger start time so that Wall(s) and CPU(s) continue
+            self.loggers._start_wall_time -= restart_info["total_wall_time"]
             self.loggers.info(
                 "log",
                 ":=> last step = {}, last_end_time = {}ps".format(
@@ -984,6 +986,7 @@ class KMC:
             "restart_" + str(last_step) + ".npz",
             last_step=last_step,
             last_time=last_time,
+            total_wall_time=time.perf_counter() - self.loggers._start_wall_time,
         )
 
     def _close(self) -> None:
