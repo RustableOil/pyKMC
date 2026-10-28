@@ -364,6 +364,8 @@ class BasinsGenericEvents:
             typ2,
             coords2,
             self.config.psr.matching_score_thr,
+            candidate1=int(np.where(np.asarray(neighbor_list) == central_atom)[0][0]),
+            candidate2=int(ref_event.at["move_atom_idx"]),
         )
         if not result.is_ok():  # PSR Err or matching score not valid
             return result
@@ -516,6 +518,10 @@ class BasinsGenericEvents:
                     typ2,
                     coords2,
                     self.config.psr.matching_score_thr,
+                    candidate1=int(
+                        np.where(np.asarray(neighbor_list) == row["central_atom"])[0][0]
+                    ),
+                    candidate2=int(ref_event.at["move_atom_idx"]),
                 )
                 if not result.is_ok():  # PSR Err or matching score not valid
                     return result

@@ -65,6 +65,34 @@ def test_recovers_known_rotation_translation_and_permutation() -> None:
     np.testing.assert_allclose(recovered, coords1, atol=1e-6)
 
 
+def test_recovers_transformation_with_central_atom_candidates() -> None:
+    # Same setup as above, but impose the central atom of each point set:
+    # atom 0 of coords1 ends up at index 1 of coords2 after the permutation.
+    rng = np.random.default_rng(0)
+    coords1 = rng.uniform(-2.0, 2.0, size=(6, 3))
+    typ = ["X"] * 6
+
+    theta = np.pi / 3
+    c, s = np.cos(theta), np.sin(theta)
+    rotation = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+    translation = np.array([1.5, -0.7, 0.3])
+    permutation = np.array([3, 0, 4, 1, 5, 2])
+
+    coords2 = (coords1 @ rotation.T + translation)[permutation]
+
+    result = make_strategy().match(
+        6, typ, coords1.copy(), 6, typ, coords2.copy(), candidate1=0, candidate2=1
+    )
+
+    assert result.is_ok()
+    out = result.ok_value()
+    assert out.matching_score == pytest.approx(0.0, abs=1e-6)
+    recovered = geometry.transform_positions(
+        coords2, out.rotation_matrix, out.translation_matrix, out.permutation_matrix
+    )
+    np.testing.assert_allclose(recovered, coords1, atol=1e-6)
+
+
 def test_no_atoms_returns_no_match_found_error() -> None:
     empty = np.zeros((0, 3))
 

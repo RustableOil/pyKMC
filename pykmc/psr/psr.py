@@ -21,7 +21,15 @@ class PointSetRegistration:
         self._strategy = strategy
 
     def match(
-        self, nat1, typ1, coords1, nat2, typ2, coords2
+        self,
+        nat1,
+        typ1,
+        coords1,
+        nat2,
+        typ2,
+        coords2,
+        candidate1=None,
+        candidate2=None,
     ) -> Result[PSROutput, ErrorInfo]:
         """Try to match two point sets using the configured strategy.
 
@@ -39,6 +47,10 @@ class PointSetRegistration:
             Atom types of the second point set.
         coords2 : np.ndarray
             Positions of the second point set.
+        candidate1 : int or np.ndarray, optional
+            Index (0-based) of the candidate central atom(s) of the first point set.
+        candidate2 : int or np.ndarray, optional
+            Index (0-based) of the candidate central atom(s) of the second point set.
 
         Returns
         -------
@@ -47,16 +59,34 @@ class PointSetRegistration:
             *second* point set onto the first (coords2 -> coords1).
 
         """
-        return self._strategy.match(nat1, typ1, coords1, nat2, typ2, coords2)
+        return self._strategy.match(
+            nat1,
+            typ1,
+            coords1,
+            nat2,
+            typ2,
+            coords2,
+            candidate1=candidate1,
+            candidate2=candidate2,
+        )
 
     def match_and_check(
-        self, nat1, typ1, coords1, nat2, typ2, coords2, matching_score_thr: float
+        self,
+        nat1,
+        typ1,
+        coords1,
+        nat2,
+        typ2,
+        coords2,
+        matching_score_thr: float,
+        candidate1=None,
+        candidate2=None,
     ) -> Result[PSROutput, ErrorInfo]:
         """Try to match two point sets and reject the result if its score is above threshold.
 
         Parameters
         ----------
-        nat1, typ1, coords1, nat2, typ2, coords2
+        nat1, typ1, coords1, nat2, typ2, coords2, candidate1, candidate2
             Forwarded to `match`.
         matching_score_thr : float
             Maximum acceptable matching score.
@@ -68,7 +98,16 @@ class PointSetRegistration:
             `matching_score_thr`.
 
         """
-        result = self.match(nat1, typ1, coords1, nat2, typ2, coords2)
+        result = self.match(
+            nat1,
+            typ1,
+            coords1,
+            nat2,
+            typ2,
+            coords2,
+            candidate1=candidate1,
+            candidate2=candidate2,
+        )
         if not result.is_ok():
             return result
         if result.ok_value().matching_score > matching_score_thr:
