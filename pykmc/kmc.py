@@ -331,8 +331,11 @@ class KMC:
                 if basin.n_psr_skipped > 0:
                     self.loggers.info(
                         "log",
-                        "\t :=> Basin skipped {} transitions with a failed PSR match.".format(
-                            basin.n_psr_skipped
+                        "\t :=> Basin skipped {} transitions with a failed PSR match "
+                        "(up to {:.2%} of a state's outgoing rate, threshold {:.2%}).".format(
+                            basin.n_psr_skipped,
+                            basin.psr_max_rate_fraction,
+                            self.config.basin.psr_skip_rate_thr,
                         ),
                     )
                 if result_basin.is_ok():  # Basin did no fail

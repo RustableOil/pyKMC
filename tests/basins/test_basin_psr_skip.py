@@ -1,4 +1,5 @@
-"""A failed PSR match drops one basin transition instead of aborting the basin."""
+"""A failed PSR match drops one basin transition, within a bound on the rate it
+carries, instead of aborting the basin."""
 
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -20,7 +21,7 @@ PSR_ERR = Err(
 )
 
 
-def row(state, state_connexion, event, central_atom, transient):
+def row(state, state_connexion, event, central_atom, transient, k=1.0):
     return {
         "state": state,
         "state_connexion": state_connexion,
@@ -29,15 +30,21 @@ def row(state, state_connexion, event, central_atom, transient):
         "sym": 0,
         "transient": transient,
         "dE_forward": 0.1,
-        "k_forward": 1.0,
+        "k_forward": k,
         "dE_backward": 0.1,
         "k_backward": 1.0,
     }
 
 
+def basin_config(psr_skip_rate_thr=1.0, **sections):
+    return SimpleNamespace(
+        basin=SimpleNamespace(psr_skip_rate_thr=psr_skip_rate_thr), **sections
+    )
+
+
 def make_basin(config=None, manager=None):
     return BasinsGenericEvents(
-        config=config or Mock(),
+        config=config or basin_config(),
         reference_table=Mock(),
         known_environments=set(),
         manager=manager or Mock(),
@@ -52,15 +59,16 @@ def no_heavy_objects(monkeypatch):
 
 
 class FakeExplorer:
-    """Give state 0 two absorbing exits (events 10 and 11)."""
+    """Give state 0 two absorbing exits: event 10 (rate k10) and 11 (rate 1)."""
 
-    def __init__(self):
+    def __init__(self, k10):
+        self.k10 = k10
         self.connectivity_table = BasinStatesConnectivity()
 
     def explore(self, state, state_index, start_index):
         self.connectivity_table.df = pd.DataFrame(
             [
-                row(state_index, start_index, 10, 1, False),
+                row(state_index, start_index, 10, 1, False, k=self.k10),
                 row(state_index, start_index + 1, 11, 2, False),
             ]
         )
@@ -69,13 +77,12 @@ class FakeExplorer:
         self.connectivity_table.clear()
 
 
-def explore_from_state_0(basin, system_from_state):
+def explore_from_state_0(basin, system_from_state, k10=1.0):
     basin.current_state = 0
     basin.states_to_explore = [0]
     basin.explored_states = []
-    basin.n_psr_skipped = 0
     basin.connectivity_table = BasinStatesConnectivity()
-    basin.explorer = FakeExplorer()
+    basin.explorer = FakeExplorer(k10)
     basin.states = {0: StateData(system=Mock(), environment=None, neighbors_list=None)}
     basin.system_from_state = system_from_state
     basin.is_new_state = lambda system: -1
@@ -83,15 +90,16 @@ def explore_from_state_0(basin, system_from_state):
     return basin.construct_connexion_table()
 
 
+def fail_event(event):
+    return lambda from_state, event_idx, central_atom, sym_idx: (
+        PSR_ERR if event_idx == event else Ok(Mock())
+    )
+
+
 class TestConstructConnexionTable:
     def test_psr_failure_drops_only_that_transition(self, no_heavy_objects):
         basin = make_basin()
-        result = explore_from_state_0(
-            basin,
-            lambda from_state, event_idx, central_atom, sym_idx: (
-                PSR_ERR if event_idx == 10 else Ok(Mock())
-            ),
-        )
+        result = explore_from_state_0(basin, fail_event(10))
 
         assert result.is_ok()
         assert basin.n_psr_skipped == 1
@@ -115,6 +123,75 @@ class TestConstructConnexionTable:
 
         assert result is reconstruction_err
         assert basin.n_psr_skipped == 0
+
+
+class TestSkipRateThreshold:
+    def test_small_dropped_rate_is_skipped(self, no_heavy_objects):
+        basin = make_basin(basin_config(psr_skip_rate_thr=0.01))
+        result = explore_from_state_0(basin, fail_event(10), k10=0.005)
+
+        assert result.is_ok()
+        assert basin.n_psr_skipped == 1
+        assert basin.psr_max_rate_fraction == pytest.approx(0.005 / 1.005)
+
+    def test_large_dropped_rate_aborts(self, no_heavy_objects):
+        basin = make_basin(basin_config(psr_skip_rate_thr=0.01))
+        result = explore_from_state_0(basin, fail_event(10), k10=0.5)
+
+        assert not result.is_ok()
+        err = result.err_value()
+        assert err.type == ErrorType.BASIN_PSR_SKIP_RATE_ABOVE_THRESHOLD
+        assert err.variables["state"] == 0
+        assert err.variables["rate_fraction"] == pytest.approx(0.5 / 1.5)
+
+    def test_zero_threshold_aborts_on_any_failure(self, no_heavy_objects):
+        basin = make_basin(basin_config(psr_skip_rate_thr=0.0))
+        result = explore_from_state_0(basin, fail_event(10), k10=1e-9)
+
+        assert not result.is_ok()
+        assert result.err_value().type == ErrorType.BASIN_PSR_SKIP_RATE_ABOVE_THRESHOLD
+
+    def test_dropped_rate_accumulates_per_state(self):
+        """A state's earlier drops count towards the bound of a later one."""
+        basin = make_basin(basin_config(psr_skip_rate_thr=0.01))
+        basin.connectivity_table = BasinStatesConnectivity()
+        basin.connectivity_table.df = pd.DataFrame(
+            [
+                row(0, 1, 1, 0, True),
+                row(1, 0, 2, 0, True, k=0.994),
+                row(1, 2, 3, 0, False, k=0.006),  # dropped
+                row(0, 3, 4, 0, False),
+            ]
+        )
+        basin.psr_dropped_rate = {1: 0.006}  # dropped while building states
+
+        result = basin._drop_exit_transitions([2])
+
+        assert not result.is_ok()
+        err = result.err_value()
+        assert err.type == ErrorType.BASIN_PSR_SKIP_RATE_ABOVE_THRESHOLD
+        assert err.variables["rate_fraction"] == pytest.approx(0.012 / 1.006)
+
+    def test_dropped_rate_follows_state_renumbering(self):
+        basin = make_basin(basin_config(psr_skip_rate_thr=0.5))
+        basin.connectivity_table = BasinStatesConnectivity()
+        basin.connectivity_table.df = pd.DataFrame(
+            [
+                row(0, 2, 1, 0, True),
+                row(2, 0, 2, 0, True),
+                row(0, 1, 3, 0, False),
+                row(2, 3, 4, 0, False),
+            ]
+        )
+        basin.states = {i: f"state{i}" for i in range(4)}
+        basin.psr_dropped_rate = {2: 0.1}
+
+        # Absorbing state 1 loses its only transition: transient 2 becomes 1
+        result = basin._drop_exit_transitions([2])
+
+        assert result.is_ok()
+        assert basin.psr_dropped_rate == {0: 1.0, 1: 0.1}
+        assert basin.states == {0: "state0", 1: "state2", 2: "state3"}
 
 
 class TestDropExitTransitions:
@@ -199,7 +276,8 @@ class TestRefineAbsorbing:
 
         monkeypatch.setattr(basin_module, "PointSetRegistration", FakePSR)
 
-        config = SimpleNamespace(
+        config = basin_config(
+            psr_skip_rate_thr=0.01,
             control=SimpleNamespace(active_volume=False),
             psr=SimpleNamespace(matching_score_thr=0.1),
             rateconstant=SimpleNamespace(k0=10.0, T=300.0),
@@ -223,7 +301,7 @@ class TestRefineAbsorbing:
             [
                 row(0, 1, 5, 0, True),
                 row(1, 0, 5, 0, True),
-                row(0, 2, 5, 99, False),  # PSR fails
+                row(0, 2, 5, 99, False, k=0.005),  # PSR fails, 0.5% of state 0
                 row(1, 3, 5, 1, False),
             ]
         )
@@ -248,6 +326,7 @@ class TestRefineAbsorbing:
         df = basin.connectivity_table.df
         assert result.is_ok()
         assert basin.n_psr_skipped == 1
+        assert basin.psr_max_rate_fraction == pytest.approx(0.005 / 1.005)
         assert manager.partn_refine.call_count == 1
         assert list(df["central_atom"]) == [0, 0, 1]
         assert df.loc[3, "state_connexion"] == 2  # old state 3 reindexed

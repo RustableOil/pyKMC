@@ -109,6 +109,10 @@ class BasinsGenericEvents:
         # central atoms, can lead to the same exit state)
         self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
         self.n_psr_skipped = 0  # Transitions dropped because of a failed PSR match
+        # Generic rate of the dropped transitions per source state, and the largest
+        # fraction of a state's outgoing rate it reached
+        self.psr_dropped_rate: dict[int, float] = {}
+        self.psr_max_rate_fraction = 0.0
 
     def detection(self, params) -> bool:
         """Utility method."""
@@ -126,7 +130,7 @@ class BasinsGenericEvents:
             return result
         # reorder states index
         mapping = self.connectivity_table.reorder_states_index()
-        self.states = {mapping[old]: val for old, val in self.states.items()}
+        self._remap_states(mapping)
         # Refine absorbing states
         result = self.refine_absorbing(system)
         if not result.is_ok():
@@ -178,6 +182,8 @@ class BasinsGenericEvents:
         self.states_to_explore = [0]
         self.explored_states = []
         self.n_psr_skipped = 0
+        self.psr_dropped_rate = {}
+        self.psr_max_rate_fraction = 0.0
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(
             config=self.config, reference_table=self.reference_table
@@ -227,13 +233,21 @@ class BasinsGenericEvents:
                     # The generic event does not match this atom's environment :
                     # drop the transition (to_explore has a single incoming row)
                     df = self.connectivity_table.df
-                    self.connectivity_table.df = df[df["state_connexion"] != to_explore]
+                    dropped = df["state_connexion"] == to_explore
+                    rate = df.loc[dropped, "k_forward"].astype(float).sum()
+                    self.connectivity_table.df = df[~dropped]
                     self.states_to_explore.remove(to_explore)
                     self.n_psr_skipped += 1
                     psr_skipped_from_states.add(from_state)
 
                     # Cleaning
                     self.states[from_state].release_heavy_objects()
+
+                    result = self._check_psr_skip_rate(
+                        {from_state: rate}, self.connectivity_table.df
+                    )
+                    if not result.is_ok():
+                        return result
                     continue  # Skip the rest
                 new_system = result.ok_value()
 
@@ -614,8 +628,18 @@ class BasinsGenericEvents:
         """
         df = self.connectivity_table.df
         transient_states = set(df["state"])
+        dropped = (
+            df.loc[rows]
+            .astype({"k_forward": float})
+            .groupby("state")["k_forward"]
+            .sum()
+        )
         df = df.drop(index=rows)
         self.n_psr_skipped += len(rows)
+
+        result = self._check_psr_skip_rate(dropped.to_dict(), df)
+        if not result.is_ok():
+            return result
 
         lost_states = transient_states.difference(df["state"])
         if lost_states or df["transient"].all():
@@ -632,10 +656,56 @@ class BasinsGenericEvents:
 
         self.connectivity_table.df = df
         mapping = self.connectivity_table.reorder_states_index()
+        self._remap_states(mapping)
+        return Ok(None)
+
+    def _check_psr_skip_rate(self, dropped, df):
+        """Bound the outgoing rate carried by transitions dropped for a failed PSR match.
+
+        ``dropped`` maps source states to the generic rate just dropped and ``df``
+        is the connectivity table without those rows. For each state, the rate
+        dropped so far is compared with its total outgoing rate (remaining +
+        dropped); above ``config.basin.psr_skip_rate_thr`` the basin fails so the
+        original KMC event is applied, as for any other basin failure.
+        """
+        threshold = self.config.basin.psr_skip_rate_thr
+        for state, rate in dropped.items():
+            self.psr_dropped_rate[state] = self.psr_dropped_rate.get(state, 0.0) + rate
+            kept = df.loc[df["state"] == state, "k_forward"].astype(float).sum()
+            total = kept + self.psr_dropped_rate[state]
+            fraction = self.psr_dropped_rate[state] / total if total > 0 else 1.0
+            if not np.isfinite(fraction):
+                fraction = 1.0
+            self.psr_max_rate_fraction = max(self.psr_max_rate_fraction, fraction)
+            if fraction > threshold:
+                return Err(
+                    ErrorInfo(
+                        type=ErrorType.BASIN_PSR_SKIP_RATE_ABOVE_THRESHOLD,
+                        message="Transitions dropped for a failed PSR match carry too "
+                        "much of a basin state's outgoing rate",
+                        details="state {}: dropped rate fraction = {:.3g}, threshold = {}".format(
+                            state, fraction, threshold
+                        ),
+                        variables={
+                            "state": state,
+                            "rate_fraction": fraction,
+                            "threshold": threshold,
+                            "n_psr_skipped": self.n_psr_skipped,
+                        },
+                    )
+                )
+        return Ok(None)
+
+    def _remap_states(self, mapping):
+        """Renumber states and their dropped rates after reorder_states_index."""
         self.states = {
             mapping[old]: val for old, val in self.states.items() if old in mapping
         }
-        return Ok(None)
+        self.psr_dropped_rate = {
+            mapping[old]: rate
+            for old, rate in self.psr_dropped_rate.items()
+            if old in mapping
+        }
 
     def is_new_state(self, system):
         # Loop over all other system in self.states to see if system is already known

@@ -84,3 +84,13 @@ The `Basin` object uses two additional components:
 The basin process may fail during PSR, refinement, reconstruction, or exit-time calculation.
 If a failure occurs, the basin returns an `Err`, and the originally selected KMC event is applied instead.
 
+A failed PSR match (applying a generic event to a basin state, or refining a transient → absorbing
+transition) is the exception, within a bound: the transition is dropped and the basin goes on, as long
+as the dropped transitions carry at most `psr_skip_rate_thr` (default 1%) of their source state's total
+outgoing rate, computed with the generic rates of the exploration and accumulated over the basin.
+Dropping a transition is an approximation: a missing exit lowers the escape rate (longer exit time) and
+redistributes its probability over the remaining exits, a missing internal transition changes the
+residence in the basin states. Beyond the threshold the basin fails as above. `psr_skip_rate_thr = 0`
+restores the strict behaviour: any failed PSR match aborts the basin. The log reports the number of
+skipped transitions and the largest dropped fraction.
+

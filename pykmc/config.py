@@ -717,6 +717,20 @@ class BasinConfig(BaseModel):
 
     energy_thr: float = Field(default=0.0, description="Energy threshold")
 
+    psr_skip_rate_thr: float = Field(
+        default=0.01,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Maximum fraction of a basin state's outgoing rate that transitions "
+            "dropped for a failed PSR match may carry. A failed match drops its "
+            "transition only while the dropped rate (generic rates) stays within "
+            "this fraction of the state's total outgoing rate; beyond it the basin "
+            "fails and the originally selected KMC event is applied. "
+            "0 aborts the basin on any failed match."
+        ),
+    )
+
 
 class EventRecyclingConfig(BaseModel):
     """Event recycling parameters. Required when control.recycle = True."""
