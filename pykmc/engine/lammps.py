@@ -127,6 +127,10 @@ class LammpsEngine(Engine):
         must apply the rotation manually using `_positions_to_lammps()` and
         `_positions_from_lammps()`.
 
+        `set_positions()` wraps atoms into the cell (periodic directions), so
+        `get_positions()` returns the positions that were set up to periodic
+        images.
+
     Examples
     --------
     Serial usage:
@@ -298,6 +302,11 @@ class LammpsEngine(Engine):
         positions = np.ascontiguousarray(positions)
         c_array = (ctypes.c_double * len(positions))(*positions)
         self.lmp.scatter_atoms("x", 1, 3, c_array)
+        # scatter_atoms only overwrites coordinates: at the next reneighboring
+        # LAMMPS wraps an atom by at most one box length and passes it to a
+        # neighboring subdomain only, so atoms that moved further are lost. A null
+        # displace_atoms remaps them into the box and migrates them to their owner.
+        self.lmp.command("displace_atoms all move 0 0 0 units box")
 
     @lammps_error_handler
     def get_total_energy(
