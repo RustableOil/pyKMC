@@ -468,7 +468,10 @@ class LogKMC(LogManager):
         self.info(logger_name, "#   dT(s)       : Time elapsed for this specific step.")
         self.info(logger_name, "#   T(s)        : Total time since simulation start.")
         self.info(logger_name, "#   E(eV)       : Energy of the system.")
-        self.info(logger_name, "#   Ea(eV)      : Activation energy barrier of the selected event.")
+        self.info(
+            logger_name,
+            "#   Ea(eV)      : Activation energy barrier of the selected event.",
+        )
         self.info(
             logger_name,
             "#   Ref         : Index in the reference table of the selected event.",
@@ -495,10 +498,14 @@ class LogKMC(LogManager):
             ),
         )
         self.info(logger_name, "#   dWall(s)    : Wall time of this step.")
-        self.info(logger_name, "#   Wall(s)     : Total wall time since simulation start.")
+        self.info(
+            logger_name, "#   Wall(s)     : Total wall time since simulation start."
+        )
         self.info(
             logger_name,
-            "#   CPU(s)      : Total CPU time (Wall(s) x {} CPUs).".format(self._n_cpus),
+            "#   CPU(s)      : Total CPU time (Wall(s) x {} CPUs).".format(
+                self._n_cpus
+            ),
         )
         self.new_line(logger_name)
         # First line of the table

@@ -189,7 +189,9 @@ def test_step_log_reads_executed_row_before_prune(
     monkeypatch.setattr(
         kmc_module,
         "info_active_events",
-        lambda *args, **kwargs: SimpleNamespace(output_msg=lambda selected: (selected, "")),
+        lambda *args, **kwargs: SimpleNamespace(
+            output_msg=lambda selected: (selected, "")
+        ),
     )
 
     monkeypatch.chdir(tmp_path)
