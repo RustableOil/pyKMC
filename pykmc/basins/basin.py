@@ -29,6 +29,25 @@ PSR_ERRORS = (
     ErrorType.PSR_MATCHING_SCORE_ABOVE_ACCEPTANCE_THRESHOLD,
 )
 
+
+def apply_event_symmetry(positions, ref_event, sym_idx):
+    """Apply symmetry ``sym_idx`` of a reference event to positions in its frame.
+
+    SOFI computes the symmetry operations about the geometric center of the
+    event's initial positions, so they are applied about that point. Rotating
+    about the origin instead shifts the positions by ``c - R c``, a whole box
+    vector for events centered in the box.
+    """
+    rotation = ref_event["sym_matrix"][sym_idx]
+    center = np.mean(ref_event["initial_positions"], axis=0)
+    return geometry.transform_positions(
+        positions,
+        rotation,
+        center - center @ rotation.T,
+        ref_event["sym_perm"][sym_idx],
+    )
+
+
 # TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 # TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
 # TODO: Think about parallized exploration
@@ -391,19 +410,14 @@ class BasinsGenericEvents:
 
         # Apply symmetry matrix if sym != 0
         if sym_idx != 0:
-            sym_matrices = ref_event["sym_matrix"]
-            sym_matrix = sym_matrices[sym_idx]
-            supposed_initial_positions = geometry.transform_positions(
-                supposed_initial_positions,
-                sym_matrix,
-                0,
-                ref_event["sym_perm"][sym_idx],
+            supposed_initial_positions = apply_event_symmetry(
+                supposed_initial_positions, ref_event, sym_idx
             )
-            saddle_positions = geometry.transform_positions(
-                saddle_positions, sym_matrix, 0, ref_event["sym_perm"][sym_idx]
+            saddle_positions = apply_event_symmetry(
+                saddle_positions, ref_event, sym_idx
             )
-            supposed_final_positions = geometry.transform_positions(
-                supposed_final_positions, sym_matrix, 0, ref_event["sym_perm"][sym_idx]
+            supposed_final_positions = apply_event_symmetry(
+                supposed_final_positions, ref_event, sym_idx
             )
         supposed_initial_positions = geometry.transform_positions(
             supposed_initial_positions,
@@ -516,13 +530,8 @@ class BasinsGenericEvents:
 
                 # Apply symmetry matrix if sym != 0
                 if row["sym"] != 0:
-                    sym_matrices = ref_event["sym_matrix"]
-                    sym_matrix = sym_matrices[row["sym"]]
-                    saddle_positions = geometry.transform_positions(
-                        saddle_positions,
-                        sym_matrix,
-                        0,
-                        ref_event["sym_perm"][row["sym"]],
+                    saddle_positions = apply_event_symmetry(
+                        saddle_positions, ref_event, row["sym"]
                     )
                 saddle_positions = geometry.transform_positions(
                     saddle_positions,
