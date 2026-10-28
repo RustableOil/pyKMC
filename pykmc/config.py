@@ -89,6 +89,11 @@ class ControlConfig(BaseModel):
         default=1, description="Controls the level of detail in the simulation output."
     )
 
+    disp_thr: Optional[float] = Field(
+        default=0.05,
+        description="Angstroms. Atoms displaced by more than this between two KMC steps are counted as moved in the output file.",
+    )
+
     refine_thr: Optional[float] = Field(
         default=0.9999,
         description="Event constributing to this percent of ktot are refined.",
