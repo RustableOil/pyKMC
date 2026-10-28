@@ -2,6 +2,7 @@ from pykmc.engine import Engine, EngineExtension
 import inspect
 import numpy as np
 import pytest
+from ase.geometry import find_mic
 
 
 class EngineContractTests:
@@ -46,7 +47,8 @@ class EngineContractTests:
         engine.close()
 
     def test_set_get_positions(self):
-        """set_positions() followed by get_positions() returns the same positions."""
+        """set_positions() followed by get_positions() returns the same positions,
+        up to periodic images (engines may wrap atoms into the cell)."""
         engine = self.make_engine()
         engine.start()
         self.initialize(engine)
@@ -55,7 +57,10 @@ class EngineContractTests:
         engine.set_positions(positions)
         result = engine.get_positions()
         if self.is_rank0:
-            np.testing.assert_allclose(result, positions, atol=1e-10)
+            difference, _ = find_mic(
+                result - positions, self.system.cell, self.system.pbc
+            )
+            np.testing.assert_allclose(difference, 0.0, atol=1e-10)
         else:
             assert result is None
         engine.close()

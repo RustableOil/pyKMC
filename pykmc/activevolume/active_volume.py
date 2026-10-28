@@ -369,3 +369,5 @@ def set_positions(engine, positions):
     positions = np.ascontiguousarray(positions)
     c_array = (ctypes.c_double * len(positions))(*positions)
     engine.lmp.scatter_atoms("x", 1, 3, c_array)
+    # Remap and migrate atoms that moved far, see LammpsEngine.set_positions
+    engine.command("displace_atoms all move 0 0 0 units box")
