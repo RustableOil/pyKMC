@@ -46,7 +46,7 @@ from .eventsearch import EventSearch
 from .refinement import Refinement
 from .log import Colors
 import time
-from .utils import push_towards, compute_delr
+from .utils import push_towards, compute_delr, per_atom_displacement
 import copy
 from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
@@ -167,6 +167,8 @@ class KMC:
             restart_info = np.load(self.config.control.restart_file)
             last_step = restart_info["last_step"]
             total_time = restart_info["last_time"]
+            # Shift the logger start time so that Wall(s) and CPU(s) continue
+            self.loggers._start_wall_time -= restart_info["total_wall_time"]
             self.loggers.info(
                 "log",
                 ":=> last step = {}, last_end_time = {}ps".format(
@@ -186,7 +188,8 @@ class KMC:
         # KMC LOOP
         for step in range(last_step, nkmc_steps + last_step):
             start_real = time.time()
-            start_cpu = time.process_time()
+            # Positions at the end of the previous step, for the displacement output
+            step_start_positions = self.system.positions.copy()
 
             self.loggers.info(
                 "log",
@@ -290,11 +293,13 @@ class KMC:
                 self.visited_environments = self.visited_environments.difference(
                     set(err_ae)
                 )
-            events_info = events_info.output_msg()
+            sorted_selected_event, events_info = events_info.output_msg(
+                idx_selected_event
+            )
 
             # INFO :
             self.loggers.events_file_step_first_line("events", step)
-            self.loggers.events_applicable_info_line("events", idx_selected_event)
+            self.loggers.events_applicable_info_line("events", sorted_selected_event)
             self.loggers.info("events", events_info)
 
             # TODO: Temporary, need to unified kmc main loop and basin operations + ugly
@@ -365,7 +370,9 @@ class KMC:
                             basin.connectivity_table,
                             result_basin.ok_value().exit_state,
                         )
-                        basin_info = basin_info.output_msg()
+                        idx_exit_event, basin_info = basin_info.output_msg(
+                            idx_exit_event
+                        )
                         self.loggers.events_basin_info_line("events", idx_exit_event)
                         self.loggers.info("events", basin_info)
 
@@ -407,6 +414,12 @@ class KMC:
                 prune_detach_recycler = False
             total_time += delta_t * 10**-12  # time is in seconds
 
+            # Atomic displacements since the previous step
+            step_disp = per_atom_displacement(
+                step_start_positions, self.system.positions, self.system.cell
+            )
+            moved = step_disp > self.config.control.disp_thr
+
             ###=> Synchronise all lammps instances with new positions
             self.manager.broadcast("set_positions", positions=self.system.positions)
             ##=>Minimize
@@ -432,19 +445,20 @@ class KMC:
             self.loggers.info("info", kmc_loop_info.output_msg())
 
             elapsed_real = time.time() - start_real
-            elapsed_cpu = time.process_time() - start_cpu
 
             self.loggers.table_line_info_kmc(
                 "output",
                 step,
                 delta_t * 10**-12,
                 total_time,
-                active_table.table.loc[idx_selected_event].at["num_reference_event"],
+                self.total_energy,
                 active_table.table.loc[idx_selected_event].at["energy_barrier"],
+                active_table.table.loc[idx_selected_event].at["num_reference_event"],
                 active_table.table.loc[idx_selected_event].at["k"],
                 ktot,
-                self.total_energy,
-                elapsed_cpu,
+                step_disp.max(),
+                step_disp[moved].sum(),
+                int(moved.sum()),
                 elapsed_real,
             )
 
@@ -972,6 +986,7 @@ class KMC:
             "restart_" + str(last_step) + ".npz",
             last_step=last_step,
             last_time=last_time,
+            total_wall_time=time.perf_counter() - self.loggers._start_wall_time,
         )
 
     def _close(self) -> None:
