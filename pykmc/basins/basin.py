@@ -113,6 +113,9 @@ class BasinsGenericEvents:
         # fraction of a state's outgoing rate it reached
         self.psr_dropped_rate: dict[int, float] = {}
         self.psr_max_rate_fraction = 0.0
+        # Exit rows neither built nor refined (negligible rate) unless selected
+        self.deferred_exit_rows: set[int] = set()
+        self._rate_constant = None
 
     def detection(self, params) -> bool:
         """Utility method."""
@@ -150,6 +153,10 @@ class BasinsGenericEvents:
         from_state, event_idx, central_atom, sym_idx, is_transient = (
             self.connectivity_table.to_tuples(transition)[0]
         )
+        if row_idx in self.deferred_exit_rows:
+            result = self._build_deferred_exit(row_idx, exit_state)
+            if not result.is_ok():
+                return result
         # Ensure from_state is state are full
         self.states[from_state].ensure_full_state(self.config)
 
@@ -184,6 +191,7 @@ class BasinsGenericEvents:
         self.n_psr_skipped = 0
         self.psr_dropped_rate = {}
         self.psr_max_rate_fraction = 0.0
+        self.deferred_exit_rows = set()
         self.connectivity_table = BasinStatesConnectivity()
         self.explorer = BasinGenericEventExplorer(
             config=self.config, reference_table=self.reference_table
@@ -217,11 +225,21 @@ class BasinsGenericEvents:
             ):  # always true except at the start (to_explore = 0)
                 # We need to create the state
                 # find a state and an event from which we go to the state that we want to create
-                from_state, event_idx, central_atom, sym_idx, is_transient = (
-                    self.connectivity_table.get_transition_to_state(
-                        target_state=to_explore
-                    )
+                transition = self.connectivity_table.get_transition_to_state(
+                    target_state=to_explore, as_tuples=False
                 )
+                from_state, event_idx, central_atom, sym_idx, is_transient = (
+                    self.connectivity_table.to_tuples(transition)[0]
+                )
+
+                # An exit with a negligible share of its state's exit rate is
+                # neither built nor refined, unless the selector picks it
+                row_idx = transition.index[0]
+                if not is_transient and self._is_negligible_exit(row_idx):
+                    self.deferred_exit_rows.add(row_idx)
+                    self.states_to_explore.remove(to_explore)
+                    self.explored_states.append(to_explore)
+                    continue
 
                 # Create new system by applying (reconstruction) the generic event to the from_state
                 result = self.system_from_state(
@@ -495,129 +513,188 @@ class BasinsGenericEvents:
         futures_context = {}  # idx → { "min": f_min, "saddle": f_sad }
         psr_failed_rows = []  # connectivity rows whose PSR match failed
         for idx, row in self.connectivity_table.df.iterrows():
-            if row["transient"] == False:  # need to refine
-                # tmp_system = copy.deepcopy(self.states[row["state"]].system)
-                tmp_system = System(
-                    positions=self.states[row["state"]].system.positions.copy(),
-                    types=self.states[row["state"]].system.types,
-                    cell=self.states[row["state"]].system.cell,
-                    pbc=True,
-                    index=np.arange(len(self.states[row["state"]].system.types)),
-                )
-                # get tmp_system energy
-                future1 = self.manager.get_total_energy(
-                    positions=tmp_system.positions.copy()
-                )  # Send copy not reference
-                # move to generic saddle positions
-                ref_event = self.reference_table.table[
-                    self.reference_table.table["idx_ref"] == row["event_connexion"]
-                ]
-                if ref_event.empty:
-                    raise ValueError(
-                        f"idx_ref={row['event_connexion']} not found in reference table"
-                    )
-                ref_event = ref_event.iloc[0].copy()
-                # ref_event = self.reference_table.table.iloc[row["event_connexion"]].copy()
-                saddle_positions = ref_event["saddle_positions"].copy()
-                # Apply PSR between event initial position and environment positions of the central_atoms
-
-                # ENSURE "STATE" FULL
-                self.states[row["state"]].ensure_full_state(self.config)
-
-                result = PointSetRegistration(
-                    self.config,
-                    tmp_system,
-                    ref_event,
-                    self.states[row["state"]].neighbors_list,
-                    row["central_atom"],
-                ).match()
-                # Check if PointSetRegistration match is valid
-                result = check_match(result, self.config.psr.matching_score_thr)
+            # need to refine (deferred exits are refined only if selected)
+            if row["transient"] == False and idx not in self.deferred_exit_rows:
+                result = self._submit_exit_refinement(row)
                 if not result.is_ok():  # PSR Err or matching score not valid
                     if result.err_value().type not in PSR_ERRORS:
                         return result
                     # Drop this exit transition, keep refining the others
                     psr_failed_rows.append(idx)
-                    self.states[row["state"]].release_heavy_objects()
                     continue
-                psr_output = result.ok_value()  # get psr results
-
-                # Apply symmetry matrix if sym != 0
-                if row["sym"] != 0:
-                    saddle_positions = apply_event_symmetry(
-                        saddle_positions, ref_event, row["sym"]
-                    )
-                saddle_positions = geometry.transform_positions(
-                    saddle_positions,
-                    psr_output.rotation_matrix,
-                    psr_output.translation_matrix,
-                    psr_output.permutation_matrix,
-                )
-                neighbors = self.states[row["state"]].neighbors_list.get_neighbors(
-                    "rcut", row["central_atom"]
-                )
-
-                if self.config.control.active_volume == True:
-                    # add a job to manager queue
-                    future2 = self.manager.partn_refine(
-                        config=self.config,
-                        central_atom_idx=row["central_atom"],
-                        positions=tmp_system.positions.copy(),
-                        cell=tmp_system.cell,
-                        types=tmp_system.types.copy(),
-                        saddle_idx=neighbors.copy(),
-                        saddle_positions=saddle_positions.copy(),
-                    )
-                # Move system do saddle positions
-                else:
-                    tmp_system.update_positions(saddle_positions, atom_idx=neighbors)
-                    # refine
-                    future2 = self.manager.partn_refine(
-                        config=self.config,
-                        central_atom_idx=row["central_atom"],
-                        positions=tmp_system.positions.copy(),
-                        saddle_idx=neighbors.copy(),
-                    )  # send copy not reference !
-
-                # save future in context :
-                futures_context[idx] = {
-                    "min": future1,
-                    "saddle": future2,
-                    "neighbors": neighbors,
-                }
-
-                # RELEASE MEMORY :
-                self.states[row["state"]].release_heavy_objects()
+                futures_context[idx] = result.ok_value()
 
         if psr_failed_rows:
             result = self._drop_exit_transitions(psr_failed_rows)
             if not result.is_ok():
                 return result
 
-        # Basin rates always use the constant prefactor k0, whatever [RateConstant] style is set.
-        rate_constant = RateConstant.create("constant", config=self.config.rateconstant)
-
         # modify connectivity table entry future1 hold min energy, future2 holds E_saddle
         for idx, ctx in futures_context.items():
-            E_min = ctx["min"].result()
-            result_sad = ctx["saddle"].result()
-            if not result_sad.is_ok():
-                return result_sad
-            E_sad = result_sad.ok_value().E_saddle
-            if self.config.control.active_volume == True:
-                dE = E_sad
-            else:
-                dE = E_sad - E_min
-            k = rate_constant.compute_rate(dE)
+            result = self._store_exit_refinement(idx, ctx)
+            if not result.is_ok():
+                return result
 
-            # also save saddle positions refined
-            self.absorbing_saddle_positions[idx] = (
-                result_sad.ok_value().saddle_positions[ctx["neighbors"]]
-            )
-            # update connectivity table row
-            self.connectivity_table.df.loc[idx, "dE_forward"] = dE
-            self.connectivity_table.df.loc[idx, "k_forward"] = k
+        # Deferred exits keep their generic barrier, with the same constant prefactor
+        df = self.connectivity_table.df
+        for idx in self.deferred_exit_rows:
+            df.loc[idx, "k_forward"] = self._constant_rate(df.loc[idx, "dE_forward"])
         return Ok(None)
+
+    def _submit_exit_refinement(self, row):
+        """Place the generic saddle of exit ``row`` with PSR and submit its refinement.
+
+        Returns the futures context of the refinement, or the PSR error.
+        """
+        state = self.states[row["state"]]
+        # tmp_system = copy.deepcopy(self.states[row["state"]].system)
+        tmp_system = System(
+            positions=state.system.positions.copy(),
+            types=state.system.types,
+            cell=state.system.cell,
+            pbc=True,
+            index=np.arange(len(state.system.types)),
+        )
+        # get tmp_system energy
+        future1 = self.manager.get_total_energy(
+            positions=tmp_system.positions.copy()
+        )  # Send copy not reference
+        # move to generic saddle positions
+        ref_event = self.reference_table.table[
+            self.reference_table.table["idx_ref"] == row["event_connexion"]
+        ]
+        if ref_event.empty:
+            raise ValueError(
+                f"idx_ref={row['event_connexion']} not found in reference table"
+            )
+        ref_event = ref_event.iloc[0].copy()
+        saddle_positions = ref_event["saddle_positions"].copy()
+        # Apply PSR between event initial position and environment positions of the central_atoms
+
+        # ENSURE "STATE" FULL
+        state.ensure_full_state(self.config)
+
+        result = PointSetRegistration(
+            self.config,
+            tmp_system,
+            ref_event,
+            state.neighbors_list,
+            row["central_atom"],
+        ).match()
+        # Check if PointSetRegistration match is valid
+        result = check_match(result, self.config.psr.matching_score_thr)
+        if not result.is_ok():
+            state.release_heavy_objects()
+            return result
+        psr_output = result.ok_value()  # get psr results
+
+        # Apply symmetry matrix if sym != 0
+        if row["sym"] != 0:
+            saddle_positions = apply_event_symmetry(
+                saddle_positions, ref_event, row["sym"]
+            )
+        saddle_positions = geometry.transform_positions(
+            saddle_positions,
+            psr_output.rotation_matrix,
+            psr_output.translation_matrix,
+            psr_output.permutation_matrix,
+        )
+        neighbors = state.neighbors_list.get_neighbors("rcut", row["central_atom"])
+
+        if self.config.control.active_volume == True:
+            # add a job to manager queue
+            future2 = self.manager.partn_refine(
+                config=self.config,
+                central_atom_idx=row["central_atom"],
+                positions=tmp_system.positions.copy(),
+                cell=tmp_system.cell,
+                types=tmp_system.types.copy(),
+                saddle_idx=neighbors.copy(),
+                saddle_positions=saddle_positions.copy(),
+            )
+        # Move system do saddle positions
+        else:
+            tmp_system.update_positions(saddle_positions, atom_idx=neighbors)
+            # refine
+            future2 = self.manager.partn_refine(
+                config=self.config,
+                central_atom_idx=row["central_atom"],
+                positions=tmp_system.positions.copy(),
+                saddle_idx=neighbors.copy(),
+            )  # send copy not reference !
+
+        # RELEASE MEMORY :
+        state.release_heavy_objects()
+
+        return Ok({"min": future1, "saddle": future2, "neighbors": neighbors})
+
+    def _store_exit_refinement(self, idx, ctx):
+        """Wait for the refinement of exit row ``idx``; store its barrier, rate and saddle."""
+        E_min = ctx["min"].result()
+        result_sad = ctx["saddle"].result()
+        if not result_sad.is_ok():
+            return result_sad
+        E_sad = result_sad.ok_value().E_saddle
+        if self.config.control.active_volume == True:
+            dE = E_sad
+        else:
+            dE = E_sad - E_min
+
+        # also save saddle positions refined
+        self.absorbing_saddle_positions[idx] = result_sad.ok_value().saddle_positions[
+            ctx["neighbors"]
+        ]
+        # update connectivity table row
+        self.connectivity_table.df.loc[idx, "dE_forward"] = dE
+        self.connectivity_table.df.loc[idx, "k_forward"] = self._constant_rate(dE)
+        return Ok(None)
+
+    def _constant_rate(self, dE):
+        """Rate of a barrier ``dE`` inside a basin.
+
+        Basin rates always use the constant prefactor k0, whatever [RateConstant]
+        style is set.
+        """
+        if self._rate_constant is None:
+            self._rate_constant = RateConstant.create(
+                "constant", config=self.config.rateconstant
+            )
+        return self._rate_constant.compute_rate(dE)
+
+    def _is_negligible_exit(self, row_idx):
+        """Whether exit ``row_idx`` is outside the exits that matter.
+
+        The exits of the row's source state are ranked by rate (generic barrier,
+        constant prefactor); those covering ``config.basin.exit_refine_thr`` of the
+        state's exit rate are built and refined, the others are deferred.
+        """
+        threshold = self.config.basin.exit_refine_thr
+        if threshold >= 1.0:
+            return False
+        df = self.connectivity_table.df
+        exits = df[
+            (df["state"] == df.at[row_idx, "state"]) & ~df["transient"].astype(bool)
+        ]
+        rates = exits["dE_forward"].astype(float).map(self._constant_rate)
+        rates = rates.sort_values(ascending=False, kind="stable")
+        covered_before = (rates.cumsum() - rates) / rates.sum()
+        return bool(covered_before.loc[row_idx] >= threshold)
+
+    def _build_deferred_exit(self, row_idx, exit_state):
+        """Build and refine a deferred exit once the selector picked it."""
+        row = self.connectivity_table.df.loc[row_idx]
+        result = self.system_from_state(
+            row["state"], row["event_connexion"], row["central_atom"], row["sym"]
+        )
+        if not result.is_ok():
+            return result
+        self._add_state(
+            state_index=exit_state, system=result.ok_value(), transient=False
+        )
+        result = self._submit_exit_refinement(row)
+        if not result.is_ok():
+            return result
+        return self._store_exit_refinement(row_idx, result.ok_value())
 
     def _drop_exit_transitions(self, rows):
         """Remove transient -> absorbing rows whose PSR match failed.

@@ -72,12 +72,26 @@ The `Basin` object uses two additional components:
       * detect applicable events
       * build its connectivity table
    7. Merge with the global connectivity table
-3. **Refine** all transient → absorbing transitions (update dE and k)
+3. **Refine** the transient → absorbing transitions that matter (update dE and k)
 4. **Selector step**:
 
    * build matrix ( M ), solve ( P = e^{-Mt} P_0 )
    * use bisection to find ( t_{\text{exit}} ) and the exit state
-5. Build the result and return it to the KMC loop
+5. Build the result and return it to the KMC loop. If the selected exit was deferred, build and refine it first
+
+### Negligible exits
+
+A basin state typically has a few low-barrier exits and many high-barrier ones (e.g. a Si split
+dumbbell: ~125 exits per basin, of which 5 to 7 carry 99.99% of the escape rate). Building an exit
+state (a minimization) and refining its saddle (pARTn) for every exit dominates the cost of the basin.
+
+For each basin state, its exits are ranked by rate (generic barrier, constant prefactor `k0`). The
+exits covering `exit_refine_thr` (default 0.9999) of the state's exit rate are built and refined as
+before. The remaining exits are *deferred*: they keep their generic barrier and enter the selector
+with that rate, so the exit time and the exit probabilities still account for them, but they are only
+built and refined if the selector picks one. Deferred exits are not checked for duplicate states (an
+exit whose final state is already known stays a separate exit), which does not change the exit time.
+`exit_refine_thr = 1` builds and refines every exit.
 6. Replace the initially chosen KMC event with the basin event
 
 

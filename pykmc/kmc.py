@@ -338,6 +338,18 @@ class KMC:
                             self.config.basin.psr_skip_rate_thr,
                         ),
                     )
+                if basin.deferred_exit_rows:
+                    df_basin = basin.connectivity_table.df
+                    n_exits = int((~df_basin["transient"].astype(bool)).sum())
+                    self.loggers.info(
+                        "log",
+                        "\t :=> Basin deferred {} of {} exits with negligible rates "
+                        "(exit_refine_thr {}).".format(
+                            len(basin.deferred_exit_rows),
+                            n_exits,
+                            self.config.basin.exit_refine_thr,
+                        ),
+                    )
                 if result_basin.is_ok():  # Basin did no fail
                     # move system to a state connected to the exit_state
                     self.system.update_positions(

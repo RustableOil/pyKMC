@@ -36,9 +36,12 @@ def row(state, state_connexion, event, central_atom, transient, k=1.0):
     }
 
 
-def basin_config(psr_skip_rate_thr=1.0, **sections):
+def basin_config(psr_skip_rate_thr=1.0, exit_refine_thr=1.0, **sections):
     return SimpleNamespace(
-        basin=SimpleNamespace(psr_skip_rate_thr=psr_skip_rate_thr), **sections
+        basin=SimpleNamespace(
+            psr_skip_rate_thr=psr_skip_rate_thr, exit_refine_thr=exit_refine_thr
+        ),
+        **sections,
     )
 
 

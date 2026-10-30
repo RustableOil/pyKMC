@@ -731,6 +731,19 @@ class BasinConfig(BaseModel):
         ),
     )
 
+    exit_refine_thr: float = Field(
+        default=0.9999,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Fraction of each basin state's exit rate (generic barriers, constant "
+            "prefactor) covered by the exits that are built and refined. The "
+            "remaining exits, with negligible rates, keep their generic barrier "
+            "and are only built and refined if the selector picks one. "
+            "1 builds and refines every exit."
+        ),
+    )
+
 
 class EventRecyclingConfig(BaseModel):
     """Event recycling parameters. Required when control.recycle = True."""
