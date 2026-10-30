@@ -375,20 +375,24 @@ class BasinsGenericEvents:
         # Apply PSR to generic event to move
 
         # Apply symmetry matrix if sym != 0
+        # Symmetries are applied to displacements, as in refinement.py: a
+        # displacement does not depend on the origin, and the initial
+        # positions are invariant under the symmetry, so they stay unchanged.
         if sym_idx != 0:
-            sym_matrices = ref_event["sym_matrix"]
-            sym_matrix = sym_matrices[sym_idx]
-            supposed_initial_positions = geometry.transform_positions(
-                supposed_initial_positions,
+            sym_matrix = ref_event["sym_matrix"][sym_idx]
+            sym_perm = ref_event["sym_perm"][sym_idx]
+            new_displacement_saddle = geometry.transform_positions(
+                saddle_positions - supposed_initial_positions, sym_matrix, 0, sym_perm
+            )
+            new_displacement_final = geometry.transform_positions(
+                supposed_final_positions - supposed_initial_positions,
                 sym_matrix,
                 0,
-                ref_event["sym_perm"][sym_idx],
+                sym_perm,
             )
-            saddle_positions = geometry.transform_positions(
-                saddle_positions, sym_matrix, 0, ref_event["sym_perm"][sym_idx]
-            )
-            supposed_final_positions = geometry.transform_positions(
-                supposed_final_positions, sym_matrix, 0, ref_event["sym_perm"][sym_idx]
+            saddle_positions = supposed_initial_positions + new_displacement_saddle
+            supposed_final_positions = (
+                supposed_initial_positions + new_displacement_final
             )
         supposed_initial_positions = geometry.transform_positions(
             supposed_initial_positions,
@@ -529,15 +533,15 @@ class BasinsGenericEvents:
                     psr_output = result.ok_value()  # get psr results
 
                 # Apply symmetry matrix if sym != 0
+                # Symmetry is applied to the displacement, as in refinement.py
                 if row["sym"] != 0:
-                    sym_matrices = ref_event["sym_matrix"]
-                    sym_matrix = sym_matrices[row["sym"]]
-                    saddle_positions = geometry.transform_positions(
-                        saddle_positions,
-                        sym_matrix,
-                        0,
-                        ref_event["sym_perm"][row["sym"]],
+                    sym_matrix = ref_event["sym_matrix"][row["sym"]]
+                    sym_perm = ref_event["sym_perm"][row["sym"]]
+                    initial_positions = ref_event["initial_positions"]
+                    new_displacement_saddle = geometry.transform_positions(
+                        saddle_positions - initial_positions, sym_matrix, 0, sym_perm
                     )
+                    saddle_positions = initial_positions + new_displacement_saddle
                 saddle_positions = geometry.transform_positions(
                     saddle_positions,
                     psr_output.rotation_matrix,
