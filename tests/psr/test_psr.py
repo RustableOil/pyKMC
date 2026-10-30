@@ -21,8 +21,12 @@ class FakeStrategy(PSRStrategy):
 
     def __init__(self, matching_score: float | None = 0.0):
         self.matching_score = matching_score
+        self.candidates = None
 
-    def match(self, nat1, typ1, coords1, nat2, typ2, coords2):
+    def match(
+        self, nat1, typ1, coords1, nat2, typ2, coords2, candidate1=None, candidate2=None
+    ):
+        self.candidates = (candidate1, candidate2)
         if self.matching_score is None:
             return Err(ErrorInfo(type=PSRError.NO_MATCH_FOUND, message="no match"))
         return Ok(PSROutput(matching_score=self.matching_score))
@@ -35,6 +39,26 @@ def test_match_delegates_to_the_strategy() -> None:
 
     assert result.is_ok()
     assert result.ok_value().matching_score == 0.0
+
+
+def test_match_forwards_candidates_to_the_strategy() -> None:
+    strategy = FakeStrategy(matching_score=0.0)
+    psr = PointSetRegistration(strategy)
+
+    psr.match(1, ["X"], [], 1, ["X"], [], candidate1=3, candidate2=5)
+
+    assert strategy.candidates == (3, 5)
+
+
+def test_match_and_check_forwards_candidates_to_the_strategy() -> None:
+    strategy = FakeStrategy(matching_score=0.0)
+    psr = PointSetRegistration(strategy)
+
+    psr.match_and_check(
+        1, ["X"], [], 1, ["X"], [], matching_score_thr=0.1, candidate1=3, candidate2=5
+    )
+
+    assert strategy.candidates == (3, 5)
 
 
 def test_create_wires_the_registered_strategy_by_name() -> None:

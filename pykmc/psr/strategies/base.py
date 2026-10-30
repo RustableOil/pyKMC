@@ -18,7 +18,15 @@ class PSRStrategy(Registrable, root=True):
 
     @abstractmethod
     def match(
-        self, nat1: int, typ1: list, coords1, nat2: int, typ2: list, coords2
+        self,
+        nat1: int,
+        typ1: list,
+        coords1,
+        nat2: int,
+        typ2: list,
+        coords2,
+        candidate1=None,
+        candidate2=None,
     ) -> Result[PSROutput, ErrorInfo]:
         """Register two point sets.
 
@@ -36,6 +44,11 @@ class PSRStrategy(Registrable, root=True):
             Atom types of the second point set.
         coords2 : np.ndarray
             Positions of the second point set.
+        candidate1 : int or np.ndarray, optional
+            Index (0-based) of the candidate central atom(s) of the first point set.
+            If None, the strategy picks its own reference point.
+        candidate2 : int or np.ndarray, optional
+            Same as `candidate1`, for the second point set.
 
         Returns
         -------

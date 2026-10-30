@@ -24,9 +24,20 @@ class IRAStrategy(PSRStrategy):
         self.config = config
 
     def match(
-        self, nat1: int, typ1: list, coords1, nat2: int, typ2: list, coords2
+        self,
+        nat1: int,
+        typ1: list,
+        coords1,
+        nat2: int,
+        typ2: list,
+        coords2,
+        candidate1=None,
+        candidate2=None,
     ) -> Result[PSROutput, ErrorInfo]:
         """Run IRA to extract rotation, translation and permutation matrices.
+
+        `candidate1`/`candidate2` are forwarded to IRA as the imposed central
+        atoms of each point set (geometric center is used when None).
 
         Returns
         -------
@@ -38,7 +49,15 @@ class IRAStrategy(PSRStrategy):
         ira = ira_mod.IRA()
         try:
             rmat, tr, perm, dh = ira.match(
-                nat1, typ1, coords1, nat2, typ2, coords2, self.config.kmax_factor
+                nat1,
+                typ1,
+                coords1,
+                nat2,
+                typ2,
+                coords2,
+                self.config.kmax_factor,
+                candidate1=candidate1,
+                candidate2=candidate2,
             )
             return Ok(
                 PSROutput(
