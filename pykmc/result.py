@@ -271,8 +271,20 @@ class EventsInfo:
     dra_f: list[float]
     refined: list[str]
 
-    def output_msg(self) -> str:
+    def output_msg(self, selected_event: int) -> tuple[int, str]:
+        """Build the events table sorted by increasing forward energy barrier.
 
+        Parameters
+        ----------
+        selected_event : int
+            Index of the selected event in the unsorted events.
+
+        Returns
+        -------
+        tuple[int, str]
+            Index of the selected event in the sorted table, and the table as a string.
+
+        """
         df = pd.DataFrame(
             {
                 "Types": self.types,
@@ -287,7 +299,11 @@ class EventsInfo:
                 "Refined": self.refined,
             }
         ).reset_index(drop=True)
-        return df.to_string(index=True)
+        # Sort by increasing energy barrier and renumber the rows
+        df = df.sort_values("dE forward", kind="stable")
+        sorted_selected_event = df.index.get_loc(selected_event)
+        df = df.reset_index(drop=True)
+        return sorted_selected_event, df.to_string(index=True)
 
 
 @dataclass

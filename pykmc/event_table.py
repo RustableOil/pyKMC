@@ -283,6 +283,8 @@ class ReferenceEventTable:
                             typ_ref,
                             ref_saddle,
                             self.config.psr.matching_score_thr,
+                            candidate1=int(dfevent_backward["move_atom_idx"]),
+                            candidate2=int(dfevent_forward["move_atom_idx"]),
                         )
 
                         # if match and matching score is acceptable
@@ -387,6 +389,8 @@ class ReferenceEventTable:
                 typ_ref,
                 ref_saddle,
                 self.config.psr.matching_score_thr,
+                candidate1=int(dfevent["move_atom_idx"]),
+                candidate2=int(ev["move_atom_idx"]),
             )
 
             if not result.is_ok():  # no match, or matching score > thr
@@ -576,6 +580,7 @@ class ReferenceEventTable:
             min2_positions[neighbor_list_forward],
             self.config.ira.sym_thr,
             types=sym_types_forward,
+            origin=min1_positions[index_move],  # central atom
         )
 
         # dr :
@@ -615,6 +620,7 @@ class ReferenceEventTable:
             min1_positions[neighbor_list_backward],
             self.config.ira.sym_thr,
             types=sym_types_backward,
+            origin=min2_positions[index_move],  # central atom
         )
         dfevent_backward = pd.Series(
             {

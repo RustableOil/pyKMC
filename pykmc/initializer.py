@@ -49,7 +49,7 @@ class Initializer:
 
         if self.kmc.config.control.restart_file is None:
             self.kmc.loggers.table_line_info_kmc(
-                "output", 0, 0.0, 0.0, None, None, None, None, self.kmc.total_energy
+                "output", 0, 0.0, 0.0, self.kmc.total_energy
             )
         else:
             self.kmc.loggers.info("log", ":=> Restarting")
@@ -62,7 +62,9 @@ class Initializer:
         self.kmc.loggers.title("log")
         self.kmc.loggers.write_parameters("log", self.kmc.config)
         if self.kmc.config.control.restart_file is None:
-            self.kmc.loggers.output_file_header("output")
+            self.kmc.loggers.output_file_header(
+                "output", disp_thr=self.kmc.config.control.disp_thr
+            )
             self.kmc.loggers.events_file_header("events")
 
     def initialize_system(self) -> None:

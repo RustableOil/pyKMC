@@ -234,6 +234,8 @@ class Refinement:
             typ2,
             coords2,
             self.config.psr.matching_score_thr,
+            candidate1=int(np.where(np.asarray(neighbor_list) == at_idx)[0][0]),
+            candidate2=int(dfevent.at["move_atom_idx"]),
         )
         if not result_psr.is_ok():
             f = concurrent.futures.Future()
