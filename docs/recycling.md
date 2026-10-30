@@ -66,6 +66,7 @@ At the next step:
 3. The newly refined events are appended to the recycled ones, duplicates are removed, and the KMC selection proceeds on the combined table.
 
 A recycled event keeps the saddle and final positions, the energy barrier and the rate computed when it was refined.
+It does not keep the refined saddle of the atoms outside its rcut environment (`[Reconstruction] refined_outer_saddle`): those atoms may have moved with the executed event, so its reconstruction starts with them at the current minimum.
 When it is selected, it is reconstructed on the current system like any other active event.
 
 ## Example

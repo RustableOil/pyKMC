@@ -119,6 +119,9 @@ class EventRefinementOutput:
     full_saddle : Optional[np.ndarray]
         Refined saddle positions of the whole system, kept until `prefactor` is
         computed.
+    outer_saddle : Optional[tuple[np.ndarray, np.ndarray]]
+        Indices and refined saddle positions of the atoms outside the rcut
+        environment that the refinement moved, or None.
     """
 
     central_atom_index: int
@@ -131,6 +134,7 @@ class EventRefinementOutput:
     prefactor: Optional[float] = None
     prefactor_status: Optional[str] = None
     full_saddle: Optional[np.ndarray] = None
+    outer_saddle: Optional[tuple[np.ndarray, np.ndarray]] = None
 
 
 @dataclass

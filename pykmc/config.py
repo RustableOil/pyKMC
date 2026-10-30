@@ -704,6 +704,12 @@ class ReconstructionConfig(BaseModel):
         default=0.15,
         description="Fraction used to push the system from the saddle point toward each minimum during reconstruction.",
     )
+    refined_outer_saddle: bool = Field(
+        default=True,
+        description="Start the reconstruction of a refined event from its refined saddle "
+        "for every atom the refinement moved (the whole active volume), instead of only "
+        "the rcut environment with the other atoms at the initial minimum.",
+    )
 
 
 class BasinConfig(BaseModel):

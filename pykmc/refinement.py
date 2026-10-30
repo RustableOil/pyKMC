@@ -17,6 +17,10 @@ import concurrent.futures
 import math
 from ._core.constants import PhysicalConstants
 
+# Atoms outside the rcut environment that the refinement moved by more than this
+# (Angstrom) keep their refined saddle positions for the reconstruction
+OUTER_SADDLE_DISPLACEMENT_THR = 1e-3
+
 
 class Refinement:
     """Perfrom event refinements and deal with results.
@@ -81,6 +85,8 @@ class Refinement:
         """
         existing_pairs = existing_pairs or set()
         self.results = []
+        initial_positions = self.system.positions.copy()
+        keep_outer_saddle = self.config.reconstruction.refined_outer_saddle
 
         total_refinements, supposed_ktot = self.get_total_refinements_todo(
             df_reference_events
@@ -134,6 +140,14 @@ class Refinement:
                 if per_event:
                     # full-size saddle, needed to compute the prefactor of a refined event
                     full_saddle = res.ok_value().saddle_positions
+                if keep_outer_saddle and res.ok_value().refined == "T":
+                    outer_saddle = self.outer_saddle(
+                        initial_positions,
+                        res.ok_value().saddle_positions,
+                        ctx["neighbors"],
+                    )
+                else:
+                    outer_saddle = None
                 res.ok_value().min2_positions = ctx["min2_positions"]
                 res.ok_value().num_reference_event = ctx["num_reference_event"]
                 res.ok_value().saddle_positions = res.ok_value().saddle_positions[
@@ -151,6 +165,8 @@ class Refinement:
                     abs(res.ok_value().dE_forward - ctx["reference_energy_barrier"]),
                     self.config.eventsearch.refined_energy_thr,
                 )
+                if isinstance(res, Ok):
+                    res.ok_value().outer_saddle = outer_saddle
                 if per_event and isinstance(res, Ok):
                     output = res.ok_value()
                     if output.refined == "T":
@@ -167,6 +183,42 @@ class Refinement:
                 err.variables["n_ref_event"] = ctx["num_reference_event"]
 
             self.results.append(res)
+
+    def outer_saddle(
+        self,
+        initial_positions: np.ndarray,
+        saddle_positions: np.ndarray,
+        neighbors: list[int],
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Atoms outside the rcut environment that the refinement moved.
+
+        With an active volume, these are the free atoms between rcut and rmov;
+        the buffer and the atoms outside the active volume do not move.
+
+        Parameters
+        ----------
+        initial_positions : np.ndarray
+            Positions of the system at the initial minimum.
+        saddle_positions : np.ndarray
+            Refined saddle positions of the whole system.
+        neighbors : list[int]
+            Indices of the atoms in the rcut environment of the central atom.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray] | None
+            Indices of the moved atoms and their saddle positions, or None if
+            none moved.
+
+        """
+        displacement = geometry.per_atom_displacement(
+            initial_positions, saddle_positions, self.system.cell
+        )
+        displacement[neighbors] = 0.0
+        moved = np.flatnonzero(displacement > OUTER_SADDLE_DISPLACEMENT_THR)
+        if len(moved) == 0:
+            return None
+        return moved, saddle_positions[moved].copy()
 
     def refine_single(
         self,

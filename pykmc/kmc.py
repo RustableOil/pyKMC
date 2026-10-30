@@ -943,18 +943,23 @@ class KMC:
     def _reconstruction_active_event(
         self, idx_selected_event: int, active_table: AtomicEnvironment
     ):
-        central_atom = active_table.table.loc[idx_selected_event].at["atom_index"]
+        event = active_table.table.loc[idx_selected_event]
+        central_atom = event.at["atom_index"]
         neighbors = self.neighbors_list.get_neighbors("rcut", central_atom)
-        saddle_positions = copy.deepcopy(
-            active_table.table.loc[idx_selected_event].at["saddle_positions"]
-        )
-        supposed_final_positions = copy.deepcopy(
-            active_table.table.loc[idx_selected_event].at["final_positions"]
-        )
+        saddle_positions = copy.deepcopy(event.at["saddle_positions"])
+        supposed_final_positions = copy.deepcopy(event.at["final_positions"])
         supposed_initial_positions = copy.deepcopy(self.system.positions[neighbors])
+        initial_positions = self.system.positions.copy()
 
         # Move the system to the saddle point
         self.system.update_positions(new_positions=saddle_positions, atom_idx=neighbors)
+        # and the atoms outside the environment to the refined saddle
+        outer_saddle = event.get("outer_saddle")
+        if outer_saddle is not None:
+            outer_idx, outer_positions = outer_saddle
+            self.system.update_positions(
+                new_positions=outer_positions, atom_idx=outer_idx
+            )
 
         # try to reconstruct
         result = Reconstruction(
@@ -970,9 +975,7 @@ class KMC:
         # result with min1, saddle, min2 pos
 
         # Back to original positions, in case reconstruction fails
-        self.system.update_positions(
-            new_positions=supposed_initial_positions, atom_idx=neighbors
-        )
+        self.system.update_positions(initial_positions)
         return result
 
     def _apply_event(

@@ -857,6 +857,7 @@ class ActiveEventTable:
                 "k": pd.Series(dtype="float64"),
                 "num_reference_event": pd.Series(dtype="int64"),
                 "refined": pd.Series(dtype="str"),
+                "outer_saddle": pd.Series(dtype="object"),
             }
             for column, (dtype, _) in self._prefactor_columns.items():
                 columns[column] = pd.Series(dtype=dtype)
@@ -872,6 +873,10 @@ class ActiveEventTable:
 
         If no recycler is attached, clear the table (matches the prior
         end-of-step `del active_table` behavior).
+
+        The refined saddle of the atoms outside the rcut environment is dropped
+        from the recycled rows: those atoms may have moved with the executed
+        event.
         """
         if self.recycler is None:
             self.table = self.table.iloc[0:0].reset_index(drop=True)
@@ -882,6 +887,8 @@ class ActiveEventTable:
                 system,
                 positions_pre,
             )
+            if "outer_saddle" in self.table:
+                self.table["outer_saddle"] = None
 
     def existing_pairs(self) -> set[tuple[int, int]]:
         """Return `(atom_index, num_reference_event)` tuples already in the table.
@@ -981,6 +988,7 @@ class ActiveEventTable:
             ),
             "num_reference_event": event_refinement_output.num_reference_event,
             "refined": event_refinement_output.refined,
+            "outer_saddle": event_refinement_output.outer_saddle,
         }
         for column, (_, missing) in self._prefactor_columns.items():
             value = getattr(event_refinement_output, column)
