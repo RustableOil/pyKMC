@@ -393,7 +393,7 @@ class KMC:
                         self.loggers.info(
                             "log",
                             "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(
-                                result_basin_reconstruction.err_value()
+                                result_basin_reconstruction.err_value().message
                             ),
                         )
                         self.system.update_positions(basin.states[0].system.positions)
@@ -404,8 +404,12 @@ class KMC:
                 else:
                     self.loggers.info(
                         "log",
-                        "\t :=> Basin fails with error : {}, back to original event".format(
-                            result_basin.err_value()
+                        "\t :=> Basin fails with error : {}: {}{}, back to original event".format(
+                            result_basin.err_value().type.name,
+                            result_basin.err_value().message,
+                            ""
+                            if result_basin.err_value().details is None
+                            else " ({})".format(result_basin.err_value().details),
                         ),
                     )
                     self.system.update_positions(
@@ -971,6 +975,7 @@ class KMC:
             self.system.cell,
             self.config.psr.matching_score_thr,
             neighbors,
+            central_atom=central_atom,
         )
         # result with min1, saddle, min2 pos
 
