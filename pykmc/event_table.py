@@ -521,6 +521,7 @@ class ReferenceEventTable:
             min2_positions[neighbor_list_forward],
             self.config.ira.sym_thr,
             types=sym_types_forward,
+            origin=min1_positions[index_move],  # central atom
         )
 
         # dr :
@@ -563,6 +564,7 @@ class ReferenceEventTable:
             min1_positions[neighbor_list_backward],
             self.config.ira.sym_thr,
             types=sym_types_backward,
+            origin=min2_positions[index_move],  # central atom
         )
         dfevent_backward = pd.Series(
             {
