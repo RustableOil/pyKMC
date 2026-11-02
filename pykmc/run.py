@@ -5,6 +5,8 @@ from an input file, initializes the KMC simulation, and runs it.
 """
 
 import argparse
+import sys
+import traceback
 from mpi4py import MPI
 from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
@@ -54,6 +56,10 @@ def main() -> None:
         except SystemExit:
             pass
         except BaseException:
+            # Abort kills every rank at once: print the traceback first
+            traceback.print_exc()
+            sys.stderr.flush()
+            sys.stdout.flush()
             comm.Abort(1)
             raise
 
