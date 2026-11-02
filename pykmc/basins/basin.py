@@ -79,7 +79,9 @@ class BasinsGenericEvents:
         self.explored_states = None  # List of state that we already explored
         self.states: dict[int, StateData] = {}  # Dictionnary of StateDate
         self.known_environments = known_environments
-        self.absorbing_saddle_positions: dict[tuple[int, int], np.ndarray] = {}
+        # Refined saddle positions per connectivity row label (several rows, i.e.
+        # central atoms, can lead to the same exit state)
+        self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
 
     def detection(self, params) -> bool:
         """Utility method."""
@@ -110,8 +112,12 @@ class BasinsGenericEvents:
         t_exit = result.ok_value().t_exit
         exit_state = result.ok_value().exit_state
 
+        transition = self.connectivity_table.get_transition_to_state(
+            target_state=exit_state, as_tuples=False
+        )
+        row_idx = transition.index[0]
         from_state, event_idx, central_atom, sym_idx, is_transient = (
-            self.connectivity_table.get_transition_to_state(target_state=exit_state)
+            self.connectivity_table.to_tuples(transition)[0]
         )
         # Ensure from_state is state are full
         self.states[from_state].ensure_full_state(self.config)
@@ -123,15 +129,10 @@ class BasinsGenericEvents:
             BasinOutput(
                 initial_system_positions=self.states[from_state].system.positions,
                 central_atom=central_atom,
-                saddle_positions=self.absorbing_saddle_positions[
-                    (from_state, exit_state)
-                ],
+                saddle_positions=self.absorbing_saddle_positions[row_idx],
                 final_positions=self.states[exit_state].system.positions[neighbors],
                 neighbors=neighbors,
-                energy_barrier=self.connectivity_table.df[
-                    (self.connectivity_table.df["state"] == from_state)
-                    & (self.connectivity_table.df["state_connexion"] == exit_state)
-                ].iloc[0]["dE_forward"],
+                energy_barrier=self.connectivity_table.df.loc[row_idx, "dE_forward"],
                 k_tot=self.connectivity_table.df.loc[
                     self.connectivity_table.df["transient"] == False, "k_forward"
                 ].sum(),
@@ -602,9 +603,7 @@ class BasinsGenericEvents:
             k = rate_constant.compute_rate(dE)
 
             # also save saddle positions refined
-            idx_state = self.connectivity_table.df.loc[idx].at["state_connexion"]
-            from_state_for_saddle = self.connectivity_table.df.loc[idx].at["state"]
-            self.absorbing_saddle_positions[(from_state_for_saddle, idx_state)] = (
+            self.absorbing_saddle_positions[idx] = (
                 result_sad.ok_value().saddle_positions[ctx["neighbors"]]
             )
             # update connectivity table row
