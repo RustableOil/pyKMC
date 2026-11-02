@@ -333,6 +333,7 @@ class KMC:
                     self.reference_table,
                     self.visited_environments,
                     self.manager,
+                    loggers=self.loggers,
                 )
                 self.system.update_positions(
                     result_reconstruction.ok_value().min1_positions

@@ -720,6 +720,13 @@ class BasinConfig(BaseModel):
     )
 
     energy_thr: float = Field(default=0.0, description="Energy threshold")
+    max_states: int = Field(
+        default=1000,
+        ge=0,
+        description="Maximum number of states in a basin. Each state costs a "
+        "minimization of the whole system; past this number the basin is abandoned "
+        "and the original event is executed. 0 removes the limit.",
+    )
 
 
 class EventRecyclingConfig(BaseModel):

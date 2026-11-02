@@ -84,3 +84,12 @@ The `Basin` object uses two additional components:
 The basin process may fail during PSR, refinement, reconstruction, or exit-time calculation.
 If a failure occurs, the basin returns an `Err`, and the originally selected KMC event is applied instead.
 
+### Choosing `energy_thr`
+
+A transition is inside the basin when both its forward and backward barriers are below `energy_thr`, and the basin only ends at exits: transitions with a barrier above the threshold, or states with an atomic environment not yet in the catalogue.
+Set `energy_thr` below the lowest barrier that should be simulated explicitly, e.g. a migration barrier.
+If migration is inside the basin, every hop leads to an equivalent, known state and the basin spreads over the whole cell (a Si self-interstitial with 0.4-0.55 eV hops and `energy_thr = 0.8` built more than 20000 states in 24 hours).
+
+`max_states` (default 1000) bounds the exploration: once the basin holds that many states, it fails with `BASIN_TOO_MANY_STATES` and the original event is executed.
+The log reports the size of the basin every 100 states, and its number of states and exits when the exploration ends.
+

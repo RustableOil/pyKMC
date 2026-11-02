@@ -20,7 +20,10 @@ import pandas as pd
 import copy
 import numpy as np
 from scipy.spatial import cKDTree
-from pykmc.result import Ok, BasinOutput
+from pykmc.result import Ok, Err, ErrorInfo, ErrorType, BasinOutput
+
+# Log the size of the basin every this many states during its exploration
+LOG_EVERY_N_STATES = 100
 
 # TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 # TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
@@ -65,8 +68,9 @@ class StateData:
 
 class BasinsGenericEvents:
     def __init__(
-        self, config: Config, reference_table, known_environments, manager
+        self, config: Config, reference_table, known_environments, manager, loggers=None
     ) -> None:
+        self.loggers = loggers  # LogKMC, optional
         self.config = config  # Config object with basins parameters
         self.explorer = None  # object to explore a state in the basin
         self.reference_table = reference_table  # Object with reference generic events
@@ -212,6 +216,26 @@ class BasinsGenericEvents:
                 self._add_state(
                     state_index=to_explore, system=new_system, transient=is_transient
                 )
+                n_states = len(self.states)
+                if n_states % LOG_EVERY_N_STATES == 0:
+                    self._log(
+                        "\t :=> Basin exploration: {} states, {} left to explore".format(
+                            n_states, len(self.states_to_explore) - 1
+                        )
+                    )
+                max_states = self.config.basin.max_states
+                if max_states > 0 and n_states >= max_states:
+                    return Err(
+                        ErrorInfo(
+                            type=ErrorType.BASIN_TOO_MANY_STATES,
+                            message="Basin reached max_states = {} states with {} left "
+                            "to explore; lower [Basin] energy_thr if transitions that "
+                            "should be simulated explicitly are inside the basin".format(
+                                max_states, len(self.states_to_explore) - 1
+                            ),
+                            variables={"n_states": n_states},
+                        )
+                    )
 
                 # ENSURE FULL STATE TO EXPLORE
                 self.states[to_explore].ensure_full_state(self.config)
@@ -260,7 +284,17 @@ class BasinsGenericEvents:
             # Clean heaby state object :
             self.states[to_explore].release_heavy_objects()
 
+        df = self.connectivity_table.get_table()
+        self._log(
+            "\t :=> Basin explored: {} states, {} exits".format(
+                len(self.states), int((~df["transient"].astype(bool)).sum())
+            )
+        )
         return Ok(None)
+
+    def _log(self, message: str) -> None:
+        if self.loggers is not None:
+            self.loggers.info("log", message)
 
     def select_event(self):
         """
