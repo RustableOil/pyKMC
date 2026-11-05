@@ -286,7 +286,24 @@ class BasinsGenericEvents:
                     from_state, event_idx, central_atom, sym_idx
                 )
                 if not result.is_ok():
-                    return result
+                    # The state cannot be built from the catalogue event: make
+                    # the transition an exit, the KMC loop reconstructs it from
+                    # its refined saddle if it is selected
+                    self.connectivity_table.change_state_to_absorbing(to_explore)
+                    self.states_to_explore.remove(to_explore)
+                    self.explored_states.append(to_explore)
+                    self.states[from_state].release_heavy_objects()
+                    self._log(
+                        "\t :=> Basin state {} (reference event {}, atom {}) could "
+                        "not be built, treated as an exit: {}: {}".format(
+                            to_explore,
+                            event_idx,
+                            central_atom,
+                            result.err_value().type.name,
+                            result.err_value().message,
+                        )
+                    )
+                    continue
                 new_system = result.ok_value()
 
                 # Check if it is a new_system or already in states

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from pykmc.basins import BasinsGenericEvents, BasinStatesConnectivity, StateData
-from pykmc.result import Ok
+from pykmc.result import Err, ErrorInfo, ErrorType, Ok
 
 
 def row(state, state_connexion, event, transient, k=1.0):
@@ -83,3 +83,24 @@ def test_only_transient_states_are_built(monkeypatch):
     assert int((~df["transient"].astype(bool)).sum()) == 3
     # every exit is still in the table, as an absorbing state
     assert set(df.loc[~df["transient"].astype(bool), "state_connexion"]) == {2, 3, 4}
+
+
+def test_transient_state_that_cannot_be_built_becomes_an_exit(monkeypatch):
+    basin, built = make_basin(monkeypatch)
+    basin.loggers = Mock()
+    basin.system_from_state = lambda *args: Err(
+        ErrorInfo(type=ErrorType.RECONSTRUCTION_INVALID_MIN2, message="delr2 = 0.4")
+    )
+
+    assert basin.construct_connexion_table().is_ok()
+
+    assert sorted(basin.states) == [0]
+    df = basin.connectivity_table.df
+    assert not df["transient"].astype(bool).any()
+    assert set(df["state_connexion"]) == {1, 2, 3}
+    messages = [c.args[1] for c in basin.loggers.info.call_args_list]
+    assert any(
+        "Basin state 1 (reference event 10, atom 0) could not be built, treated as "
+        "an exit: RECONSTRUCTION_INVALID_MIN2: delr2 = 0.4" in m
+        for m in messages
+    )

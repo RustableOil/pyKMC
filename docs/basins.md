@@ -64,7 +64,7 @@ The `Basin` object uses two additional components:
 
    1. Find the connection (event) between a known state and this state
    2. If the state is absorbing (an exit), stop: exit states are not built
-   3. Apply the event (reconstruction using a generic event)
+   3. Apply the event (reconstruction using a generic event); if the state cannot be built, mark it as absorbing → stop
    4. If the state is already known (distance-based check), stop
    5. If the state has an unknown atomic environment → mark as absorbing → stop
    6. Send the state to the Explorer:
@@ -89,6 +89,7 @@ If a failure occurs, the basin returns an `Err`, and the originally selected KMC
 
 A selected exit that cannot be reconstructed (or whose generic event no longer maps onto its from state) does not abandon the basin: the exit is dropped, its rate is removed from the escape rate, and the exit time and exit are drawn again from the remaining exits.
 The log reports each dropped exit and the share of the exit rate the dropped exits carried.
+A transient state that cannot be built from its catalogue event becomes an exit the same way, instead of abandoning the basin: if it is selected, the KMC loop reconstructs it from its refined saddle.
 After 10 dropped exits, or when no exit is left, the basin fails with `BASIN_EXIT_FAILED` and the original event is executed.
 
 ### Choosing `energy_thr`
