@@ -87,6 +87,10 @@ An exit state is only needed when its exit is selected, and building every exit 
 The basin process may fail during PSR, refinement, reconstruction, or exit-time calculation.
 If a failure occurs, the basin returns an `Err`, and the originally selected KMC event is applied instead.
 
+A selected exit that cannot be reconstructed (or whose generic event no longer maps onto its from state) does not abandon the basin: the exit is dropped, its rate is removed from the escape rate, and the exit time and exit are drawn again from the remaining exits.
+The log reports each dropped exit and the share of the exit rate the dropped exits carried.
+After 10 dropped exits, or when no exit is left, the basin fails with `BASIN_EXIT_FAILED` and the original event is executed.
+
 ### Choosing `energy_thr`
 
 A transition is inside the basin when both its forward and backward barriers are below `energy_thr`, and the basin only ends at exits: transitions with a barrier above the threshold, or states with an atomic environment not yet in the catalogue.

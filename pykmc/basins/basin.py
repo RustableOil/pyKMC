@@ -24,6 +24,8 @@ from pykmc.result import Ok, Err, ErrorInfo, ErrorType, BasinOutput, Result
 
 # Log the size of the basin every this many states during its exploration
 LOG_EVERY_N_STATES = 100
+# Abandon the basin after this many selected exits failed to be reconstructed
+MAX_DROPPED_EXITS = 10
 
 # TODO: StateDate is here to handle state informations, when State Object will be creates, need to remove
 # TODO: For the moment Basin uses EnergyThresholdDetector, BasinGenericEventExplorer, FPTASelector, need to deal with possible multiple implementation with builder.
@@ -97,6 +99,8 @@ class BasinsGenericEvents:
         # Refined saddle positions per connectivity row label (several rows, i.e.
         # central atoms, can lead to the same exit state)
         self.absorbing_saddle_positions: dict[int, np.ndarray] = {}
+        self.n_dropped_exits = 0  # selected exits that could not be reconstructed
+        self.dropped_exit_rate = 0.0  # their total rate
 
     def detection(self, params) -> bool:
         """Utility method."""
@@ -119,45 +123,110 @@ class BasinsGenericEvents:
         result = self.refine_absorbing(system)
         if not result.is_ok():
             return result
-        # apply selector algorithm to find t_exit and exit_state
-        result = self.selector.select_from_connectivity(self.connectivity_table)
-        if not result.is_ok():
-            return result
-        # Construct output KMC needs
-        t_exit = result.ok_value().t_exit
-        exit_state = result.ok_value().exit_state
+        return self.select_exit()
 
-        transition = self.connectivity_table.get_transition_to_state(
-            target_state=exit_state, as_tuples=False
-        )
-        row_idx = transition.index[0]
-        from_state, event_idx, central_atom, sym_idx, is_transient = (
-            self.connectivity_table.to_tuples(transition)[0]
-        )
-        # Exit states are not built during the exploration: the expected final
-        # positions come from the generic event mapped onto the from state
-        result = self.map_event(from_state, event_idx, central_atom, sym_idx)
+    def select_exit(self) -> "Result[BasinOutput, ErrorInfo]":
+        """Select an exit with the FPTA and build the output the KMC loop needs.
+
+        An exit whose generic event no longer maps onto its from state is
+        dropped and another exit is selected.
+        """
+        while True:
+            # apply selector algorithm to find t_exit and exit_state
+            result = self.selector.select_from_connectivity(self.connectivity_table)
+            if not result.is_ok():
+                return result
+            t_exit = result.ok_value().t_exit
+            exit_state = result.ok_value().exit_state
+
+            transition = self.connectivity_table.get_transition_to_state(
+                target_state=exit_state, as_tuples=False
+            )
+            row_idx = transition.index[0]
+            from_state, event_idx, central_atom, sym_idx, is_transient = (
+                self.connectivity_table.to_tuples(transition)[0]
+            )
+            # Exit states are not built during the exploration: the expected
+            # final positions come from the generic event mapped onto the from state
+            result = self.map_event(from_state, event_idx, central_atom, sym_idx)
+            if not result.is_ok():
+                result = self._drop_exit(exit_state, result.err_value().message)
+                if not result.is_ok():
+                    return result
+                continue
+            mapped = result.ok_value()
+            df = self.connectivity_table.df
+            return Ok(
+                BasinOutput(
+                    initial_system_positions=self.states[from_state].system.positions,
+                    central_atom=central_atom,
+                    saddle_positions=self.absorbing_saddle_positions[row_idx],
+                    final_positions=mapped.final_positions,
+                    neighbors=mapped.neighbors,
+                    energy_barrier=df.loc[row_idx, "dE_forward"],
+                    k_tot=df.loc[df["transient"] == False, "k_forward"].sum(),
+                    t_exit=t_exit,
+                    exit_state=exit_state,
+                    from_state=from_state,
+                    num_reference_event=event_idx,
+                )
+            )
+
+    def reselect_exit(
+        self, failed_exit_state: int, reason: str
+    ) -> "Result[BasinOutput, ErrorInfo]":
+        """Drop an exit the KMC loop could not reconstruct and select another one."""
+        result = self._drop_exit(failed_exit_state, reason)
         if not result.is_ok():
             return result
-        mapped = result.ok_value()
-        neighbors = mapped.neighbors
-        return Ok(
-            BasinOutput(
-                initial_system_positions=self.states[from_state].system.positions,
-                central_atom=central_atom,
-                saddle_positions=self.absorbing_saddle_positions[row_idx],
-                final_positions=mapped.final_positions,
-                neighbors=neighbors,
-                energy_barrier=self.connectivity_table.df.loc[row_idx, "dE_forward"],
-                k_tot=self.connectivity_table.df.loc[
-                    self.connectivity_table.df["transient"] == False, "k_forward"
-                ].sum(),
-                t_exit=t_exit,
-                exit_state=exit_state,
-                from_state=from_state,
-                num_reference_event=event_idx,
+        return self.select_exit()
+
+    def _drop_exit(self, exit_state: int, reason: str) -> "Result[None, ErrorInfo]":
+        """Remove an exit from the basin by zeroing the rates leading to it.
+
+        The exit time is then drawn again from the remaining exits; the rate of
+        the dropped exits is reported, since it is missing from the escape rate.
+        """
+        df = self.connectivity_table.df
+        exits = df["transient"] == False
+        k_exits = (
+            df.loc[exits, "k_forward"].astype(float).sum() + self.dropped_exit_rate
+        )
+        into = df["state_connexion"] == exit_state
+        row = df[into].iloc[0]
+        k_dropped = df.loc[into, "k_forward"].astype(float).sum()
+        df.loc[into, "k_forward"] = 0.0
+        self.dropped_exit_rate += k_dropped
+        self.n_dropped_exits += 1
+        share = self.dropped_exit_rate / k_exits if k_exits > 0 else 1.0
+        self._log(
+            "\t :=> Basin exit {} (reference event {}, atom {}, dE = {:.4f} eV) "
+            "dropped: {}; dropped exits carry {:.1%} of the exit rate".format(
+                exit_state,
+                row["event_connexion"],
+                row["central_atom"],
+                float(row["dE_forward"]),
+                reason,
+                share,
             )
         )
+        if (
+            self.n_dropped_exits >= MAX_DROPPED_EXITS
+            or not (df.loc[exits, "k_forward"].astype(float) > 0).any()
+        ):
+            return Err(
+                ErrorInfo(
+                    type=ErrorType.BASIN_EXIT_FAILED,
+                    message="{} basin exits could not be reconstructed".format(
+                        self.n_dropped_exits
+                    ),
+                    variables={
+                        "n_dropped_exits": self.n_dropped_exits,
+                        "dropped_rate_fraction": share,
+                    },
+                )
+            )
+        return Ok(None)
 
     def _initialize(self, system) -> None:
         """
@@ -171,6 +240,8 @@ class BasinsGenericEvents:
             config=self.config, reference_table=self.reference_table
         )
         self.selector = FPTASelector()
+        self.n_dropped_exits = 0
+        self.dropped_exit_rate = 0.0
         new_system = System(
             positions=system.positions.copy(),
             types=system.types.copy(),

@@ -129,6 +129,7 @@ class ErrorType(Enum):
     RECONSTRUCTION_INVALID_MIN2 = 42
     BASIN_TEXIT_NOT_FOUND = 51
     BASIN_TOO_MANY_STATES = 52
+    BASIN_EXIT_FAILED = 53
 
 
 class ErrorCode(Enum):

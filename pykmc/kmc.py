@@ -339,7 +339,11 @@ class KMC:
                     result_reconstruction.ok_value().min1_positions
                 )
                 result_basin = basin.execute(self.system)
-                if result_basin.is_ok():  # Basin did no fail
+                neighbors_list_before_basin = self.neighbors_list
+                basin_exit_reconstructed = False
+                # An exit that cannot be reconstructed from its refined saddle is
+                # dropped and another exit is selected
+                while result_basin.is_ok() and not basin_exit_reconstructed:
                     # move system to a state connected to the exit_state
                     self.system.update_positions(
                         result_basin.ok_value().initial_system_positions
@@ -359,49 +363,46 @@ class KMC:
                         dE_forward=result_basin.ok_value().energy_barrier,
                         num_reference_event=result_basin.ok_value().num_reference_event,
                     )
-                    neighbors = result_basin.ok_value().neighbors
                     tmp_active_table.add_events(tmp_event)
                     # reconstruct event
                     result_basin_reconstruction = self._reconstruction_active_event(
                         0, tmp_active_table
                     )
                     if result_basin_reconstruction.is_ok():
-                        self.system.update_positions(
-                            result_basin_reconstruction.ok_value().min2_positions
-                        )
-                        self.total_energy = (
-                            result_basin_reconstruction.ok_value().min2_etot
-                        )
-                        delta_t = result_basin.ok_value().t_exit
-                        ktot = result_basin.ok_value().k_tot
-                        idx_selected_event = 0
-                        active_table.table = tmp_active_table.table
-
-                        # INFO
-                        idx_exit_event, basin_info = info_basin_events(
-                            self.system.types,
-                            self.reference_table,
-                            basin.connectivity_table,
-                            result_basin.ok_value().exit_state,
-                        )
-                        idx_exit_event, basin_info = basin_info.output_msg(
-                            idx_exit_event
-                        )
-                        self.loggers.events_basin_info_line("events", idx_exit_event)
-                        self.loggers.info("events", basin_info)
-
+                        basin_exit_reconstructed = True
                     else:
+                        message = result_basin_reconstruction.err_value().message
                         self.loggers.info(
                             "log",
-                            "\t :=> Reconstruction Exit State Basin fails with error {}, back to original event".format(
-                                result_basin_reconstruction.err_value().message
+                            "\t :=> Reconstruction Exit State Basin fails with error {}, selecting another exit".format(
+                                message
                             ),
                         )
-                        self.system.update_positions(basin.states[0].system.positions)
-                        self.system.update_positions(
-                            result_reconstruction.ok_value().min2_positions
+                        result_basin = basin.reselect_exit(
+                            result_basin.ok_value().exit_state,
+                            "reconstruction failed",
                         )
-                        self.total_energy = result_reconstruction.ok_value().min2_etot
+
+                if basin_exit_reconstructed:
+                    self.system.update_positions(
+                        result_basin_reconstruction.ok_value().min2_positions
+                    )
+                    self.total_energy = result_basin_reconstruction.ok_value().min2_etot
+                    delta_t = result_basin.ok_value().t_exit
+                    ktot = result_basin.ok_value().k_tot
+                    idx_selected_event = 0
+                    active_table.table = tmp_active_table.table
+
+                    # INFO
+                    idx_exit_event, basin_info = info_basin_events(
+                        self.system.types,
+                        self.reference_table,
+                        basin.connectivity_table,
+                        result_basin.ok_value().exit_state,
+                    )
+                    idx_exit_event, basin_info = basin_info.output_msg(idx_exit_event)
+                    self.loggers.events_basin_info_line("events", idx_exit_event)
+                    self.loggers.info("events", basin_info)
                 else:
                     self.loggers.info(
                         "log",
@@ -413,6 +414,7 @@ class KMC:
                             else " ({})".format(result_basin.err_value().details),
                         ),
                     )
+                    self.neighbors_list = neighbors_list_before_basin
                     self.system.update_positions(
                         result_reconstruction.ok_value().min2_positions
                     )
