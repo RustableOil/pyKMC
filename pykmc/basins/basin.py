@@ -20,7 +20,7 @@ import pandas as pd
 import copy
 import numpy as np
 from scipy.spatial import cKDTree
-from pykmc.result import Ok, Err, ErrorInfo, ErrorType, BasinOutput
+from pykmc.result import Ok, Err, ErrorInfo, ErrorType, BasinOutput, Result
 
 # Log the size of the basin every this many states during its exploration
 LOG_EVERY_N_STATES = 100
@@ -64,6 +64,17 @@ class StateData:
                     types=self.system.types,
                     coloring_mode=config.atomicenvironment.atom_coloring_mode,
                 )
+
+
+@dataclass
+class MappedEvent:
+    """A generic event mapped onto an atom of a basin state."""
+
+    system: System  # copy of the state, positions unchanged
+    neighbors: np.ndarray  # rcut environment of the central atom
+    initial_positions: np.ndarray  # expected positions of `neighbors`
+    saddle_positions: np.ndarray
+    final_positions: np.ndarray
 
 
 class BasinsGenericEvents:
@@ -123,18 +134,19 @@ class BasinsGenericEvents:
         from_state, event_idx, central_atom, sym_idx, is_transient = (
             self.connectivity_table.to_tuples(transition)[0]
         )
-        # Ensure from_state is state are full
-        self.states[from_state].ensure_full_state(self.config)
-
-        neighbors = self.states[from_state].neighbors_list.get_neighbors(
-            "rcut", central_atom
-        )
+        # Exit states are not built during the exploration: the expected final
+        # positions come from the generic event mapped onto the from state
+        result = self.map_event(from_state, event_idx, central_atom, sym_idx)
+        if not result.is_ok():
+            return result
+        mapped = result.ok_value()
+        neighbors = mapped.neighbors
         return Ok(
             BasinOutput(
                 initial_system_positions=self.states[from_state].system.positions,
                 central_atom=central_atom,
                 saddle_positions=self.absorbing_saddle_positions[row_idx],
-                final_positions=self.states[exit_state].system.positions[neighbors],
+                final_positions=mapped.final_positions,
                 neighbors=neighbors,
                 energy_barrier=self.connectivity_table.df.loc[row_idx, "dE_forward"],
                 k_tot=self.connectivity_table.df.loc[
@@ -189,6 +201,14 @@ class BasinsGenericEvents:
                         target_state=to_explore
                     )
                 )
+
+                if not is_transient:
+                    # Exits are absorbing and never explored: their state is
+                    # only needed if the exit is selected, and the KMC loop then
+                    # reconstructs it from the refined saddle (see execute)
+                    self.states_to_explore.remove(to_explore)
+                    self.explored_states.append(to_explore)
+                    continue
 
                 # Create new system by applying (reconstruction) the generic event to the from_state
                 result = self.system_from_state(
@@ -326,9 +346,11 @@ class BasinsGenericEvents:
             unique_states.difference(set(self.explored_states))
         )
 
-    def system_from_state(self, from_state, event_idx, central_atom, sym_idx):
-        """Reconstruct the generic event to generate new state from state"""
-
+    def map_event(
+        self, from_state, event_idx, central_atom, sym_idx
+    ) -> "Result[MappedEvent, ErrorInfo]":
+        """Map a generic event onto `central_atom` of `from_state` (PSR and
+        symmetry), without moving any atom."""
         ref_event = self.reference_table.table[
             self.reference_table.table["idx_ref"] == event_idx
         ]  # event where event_idx == idx_ref
@@ -448,11 +470,32 @@ class BasinsGenericEvents:
             psr_output.permutation_matrix,
         )
 
-        # Move system do saddle positions
         neighbors = self.states[from_state].neighbors_list.get_neighbors(
             "rcut", central_atom
         )
+        return Ok(
+            MappedEvent(
+                system=new_system,
+                neighbors=neighbors,
+                initial_positions=supposed_initial_positions,
+                saddle_positions=saddle_positions,
+                final_positions=supposed_final_positions,
+            )
+        )
 
+    def system_from_state(self, from_state, event_idx, central_atom, sym_idx):
+        """Reconstruct the generic event to generate new state from state"""
+        result = self.map_event(from_state, event_idx, central_atom, sym_idx)
+        if not result.is_ok():
+            return result
+        mapped = result.ok_value()
+        new_system = mapped.system
+        neighbors = mapped.neighbors
+        supposed_initial_positions = mapped.initial_positions
+        saddle_positions = mapped.saddle_positions
+        supposed_final_positions = mapped.final_positions
+
+        # Move system do saddle positions
         if self.config.basin.style == "global":
             new_system.update_positions(supposed_final_positions, atom_idx=neighbors)
             min2_pos, _ = self.manager.group_minimize_with_results(

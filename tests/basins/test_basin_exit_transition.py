@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from pykmc.basins import BasinsGenericEvents, BasinStatesConnectivity, StateData
+from pykmc.basins.basin import MappedEvent
 from pykmc.result import Ok
 
 
@@ -61,6 +62,20 @@ def test_output_comes_from_one_transition(monkeypatch):
         return Ok(None)
 
     basin.refine_absorbing = refine
+
+    def map_event(from_state, event_idx, central_atom, sym_idx):
+        n = len(neighbors[central_atom])
+        return Ok(
+            MappedEvent(
+                system=None,
+                neighbors=neighbors[central_atom],
+                initial_positions=np.zeros((n, 3)),
+                saddle_positions=np.ones((n, 3)),
+                final_positions=np.full((n, 3), 2.0),
+            )
+        )
+
+    basin.map_event = map_event
     basin.selector = Mock(
         select_from_connectivity=Mock(
             return_value=Ok(SimpleNamespace(t_exit=1.0, exit_state=2))
@@ -72,4 +87,5 @@ def test_output_comes_from_one_transition(monkeypatch):
     assert out.central_atom == 7
     assert out.num_reference_event == 173
     assert len(out.neighbors) == len(out.saddle_positions) == 3
+    assert len(out.final_positions) == 3
     assert out.energy_barrier == 0.18

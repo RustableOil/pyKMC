@@ -96,8 +96,8 @@ def test_finite_basin_is_not_limited(monkeypatch, max_states):
     basin, loggers = make_basin(monkeypatch, max_states=max_states, length=150)
 
     assert basin.construct_connexion_table().is_ok()
-    assert len(basin.states) == 151  # states 0 to 149 and the exit
-    assert logged(loggers)[-1] == "\t :=> Basin explored: 151 states, 1 exits"
+    assert len(basin.states) == 150  # states 0 to 149, the exit is not built
+    assert logged(loggers)[-1] == "\t :=> Basin explored: 150 states, 1 exits"
 
 
 def test_no_limit(monkeypatch):
@@ -105,7 +105,7 @@ def test_no_limit(monkeypatch):
     basin, _ = make_basin(monkeypatch, max_states=0, length=1200)
 
     assert basin.construct_connexion_table().is_ok()
-    assert len(basin.states) == 1201
+    assert len(basin.states) == 1200
 
 
 def test_basin_without_loggers(monkeypatch):

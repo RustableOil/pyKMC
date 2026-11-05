@@ -62,11 +62,11 @@ The `Basin` object uses two additional components:
 1. **Initialization**: state to explore = current state
 2. **While states remain to explore:**
 
-   1. If the state is already known (distance-based check), stop
-   2. If the state has an unknown atomic environment → mark as absorbing → stop
-   3. If the state is absorbing, stop
-   4. Find the connection (event) between a known state and this state
-   5. Apply the event (reconstruction using a generic event)
+   1. Find the connection (event) between a known state and this state
+   2. If the state is absorbing (an exit), stop: exit states are not built
+   3. Apply the event (reconstruction using a generic event)
+   4. If the state is already known (distance-based check), stop
+   5. If the state has an unknown atomic environment → mark as absorbing → stop
    6. Send the state to the Explorer:
 
       * detect applicable events
@@ -77,8 +77,11 @@ The `Basin` object uses two additional components:
 
    * build matrix ( M ), solve ( P = e^{-Mt} P_0 )
    * use bisection to find ( t_{\text{exit}} ) and the exit state
-5. Build the result and return it to the KMC loop
-6. Replace the initially chosen KMC event with the basin event
+5. Build the result and return it to the KMC loop: the expected final positions of the exit are those of its generic event, mapped onto the from state
+6. Replace the initially chosen KMC event with the basin event: the KMC loop reconstructs the exit from its refined saddle
+
+Only transient states are built during the exploration.
+An exit state is only needed when its exit is selected, and building every exit from the unrefined catalogue saddle was most of the cost of a basin; it could also fail on exits that are never selected (e.g. a 2.75 eV exit with a 0.127 A deviation) and abandon the whole basin.
 
 
 The basin process may fail during PSR, refinement, reconstruction, or exit-time calculation.
@@ -90,6 +93,6 @@ A transition is inside the basin when both its forward and backward barriers are
 Set `energy_thr` below the lowest barrier that should be simulated explicitly, e.g. a migration barrier.
 If migration is inside the basin, every hop leads to an equivalent, known state and the basin spreads over the whole cell (a Si self-interstitial with 0.4-0.55 eV hops and `energy_thr = 0.8` built more than 20000 states in 24 hours).
 
-`max_states` (default 1000) bounds the exploration: once the basin holds that many states, it fails with `BASIN_TOO_MANY_STATES` and the original event is executed.
+`max_states` (default 1000) bounds the exploration: once the basin holds that many (transient) states, it fails with `BASIN_TOO_MANY_STATES` and the original event is executed.
 The log reports the size of the basin every 100 states, and its number of states and exits when the exploration ends.
 

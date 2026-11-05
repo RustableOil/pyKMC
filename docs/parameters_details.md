@@ -474,7 +474,7 @@
   </details>
 - **`max_states`** : `int`, default = `1000`
   <details><summary>Description</summary>
-  Maximum number of states in a basin. Each state costs a minimization of the whole system; past this number the basin is abandoned and the original event is executed. 0 removes the limit.
+  Maximum number of transient states in a basin. Each state costs a reconstruction of the whole system; past this number the basin is abandoned and the original event is executed. 0 removes the limit.
   </details>
 
 ---
