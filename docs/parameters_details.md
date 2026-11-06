@@ -480,6 +480,10 @@
   <details><summary>Description</summary>
   Angstroms. Maximum distance from the basin centre (the central atom of the event that triggered the basin) of an atom moved in a basin state; past it the basin is abandoned and the original event is executed. 0 removes the limit.
   </details>
+- **`max_radius_disp_thr`** : `float`, default = `0.3`
+  <details><summary>Description</summary>
+  Angstroms. Displacement from the state where the basin was entered above which an atom counts as moved for max_radius and for the basin extent reported in the log. Small values also count the elastic relaxation around the defect.
+  </details>
 - **`psr_skip_rate_thr`** : `float`, default = `0.01`
   <details><summary>Description</summary>
   Maximum fraction of a basin state's outgoing rate that transitions dropped for a failed PSR match may carry. A failed match drops its transition only while the dropped rate (generic rates) stays within this fraction of the state's total outgoing rate; beyond it the basin fails and the originally selected KMC event is applied. 0 aborts the basin on any failed match.

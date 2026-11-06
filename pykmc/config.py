@@ -735,6 +735,14 @@ class BasinConfig(BaseModel):
         "state; past it the basin is abandoned and the original event is executed. "
         "0 removes the limit.",
     )
+    max_radius_disp_thr: float = Field(
+        default=0.3,
+        gt=0.0,
+        description="Angstroms. Displacement from the state where the basin was "
+        "entered above which an atom counts as moved for max_radius and for the "
+        "basin extent reported in the log. Small values also count the elastic "
+        "relaxation around the defect.",
+    )
     psr_skip_rate_thr: float = Field(
         default=0.01,
         ge=0.0,

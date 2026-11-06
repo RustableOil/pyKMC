@@ -506,12 +506,14 @@ class BasinsGenericEvents:
 
     def _extent(self, system) -> float:
         """Largest distance from the basin centre of an atom of `system` that moved
-        by more than [Control] disp_thr from state 0 (0 if none moved)."""
+        by more than [Basin] max_radius_disp_thr from state 0 (0 if none moved)."""
         reference = self.states[0].system.positions
         displacement, _ = ase.geometry.find_mic(
             system.positions - reference, system.cell, pbc=True
         )
-        moved = np.linalg.norm(displacement, axis=1) > self.config.control.disp_thr
+        moved = (
+            np.linalg.norm(displacement, axis=1) > self.config.basin.max_radius_disp_thr
+        )
         if not moved.any():
             return 0.0
         _, distances = ase.geometry.find_mic(

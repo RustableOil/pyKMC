@@ -55,15 +55,16 @@ def chain_positions():
     return positions
 
 
-def make_basin(monkeypatch, max_radius, length=10, center=0):
+def make_basin(monkeypatch, max_radius, length=10, center=0, disp_thr=0.3):
     """State n has atoms 1 to n moved by 0.5 A along y: its extent from atom 0
     is that of atom n, about 2 n A."""
     monkeypatch.setattr(StateData, "ensure_full_state", lambda self, config: None)
     monkeypatch.setattr(StateData, "release_heavy_objects", lambda self: None)
     loggers = Mock()
     config = SimpleNamespace(
-        basin=SimpleNamespace(max_states=0, max_radius=max_radius),
-        control=SimpleNamespace(disp_thr=0.05),
+        basin=SimpleNamespace(
+            max_states=0, max_radius=max_radius, max_radius_disp_thr=disp_thr
+        ),
     )
     basin = BasinsGenericEvents(
         config=config,
@@ -157,3 +158,11 @@ def test_no_center_no_check(monkeypatch):
 
     assert basin.construct_connexion_table().is_ok()
     assert logged(loggers)[-1] == "\t :=> Basin explored: 10 states, 1 exits"
+
+
+def test_small_displacements_do_not_count(monkeypatch):
+    """Atoms moved by 0.5 A count with a 0.3 A threshold, not with a 0.6 A one."""
+    basin, _ = make_basin(monkeypatch, max_radius=7.0, disp_thr=0.6)
+
+    assert basin.construct_connexion_table().is_ok()
+    assert basin.max_extent == 0.0
