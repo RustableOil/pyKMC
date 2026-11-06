@@ -727,6 +727,14 @@ class BasinConfig(BaseModel):
         "costs a reconstruction of the whole system; past this number the basin is "
         "abandoned and the original event is executed. 0 removes the limit.",
     )
+    max_radius: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Angstroms. Maximum distance from the basin centre (the central "
+        "atom of the event that triggered the basin) of an atom moved in a basin "
+        "state; past it the basin is abandoned and the original event is executed. "
+        "0 removes the limit.",
+    )
     psr_skip_rate_thr: float = Field(
         default=0.01,
         ge=0.0,

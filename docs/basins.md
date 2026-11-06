@@ -123,3 +123,9 @@ If migration is inside the basin, every hop leads to an equivalent, known state 
 `max_states` (default 1000) bounds the exploration: once the basin holds that many (transient) states, it fails with `BASIN_TOO_MANY_STATES` and the original event is executed.
 The log reports the size of the basin every 100 states, and its number of states and exits when the exploration ends.
 
+`max_radius` (in A, default 0: no limit) bounds the exploration geometrically instead.
+The basin centre is the central atom of the event that triggered the basin, in the state where the basin was entered.
+Each state built during the exploration is compared with that state: if an atom moved by more than `[Control] disp_thr` lies farther than `max_radius` from the centre, the basin fails with `BASIN_OUTSIDE_RADIUS` and the original event is executed.
+The end-of-exploration log line reports the basin's extent (the largest such distance), which helps choose the radius: a basin confined to a defect's neighbourhood extends a few A, a migrating defect keeps growing it.
+Both bounds can be used together.
+

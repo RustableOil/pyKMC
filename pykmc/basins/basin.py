@@ -18,6 +18,7 @@ from ..utils import geometry
 from ..rate_constant import RateConstant
 import pandas as pd
 import copy
+import ase.geometry
 import numpy as np
 from scipy.spatial import cKDTree
 from pykmc.result import Ok, Err, ErrorInfo, ErrorType, BasinOutput, Result
@@ -114,17 +115,26 @@ class BasinsGenericEvents:
         # exits with a negligible share of the exit rate: refined only if selected
         self.deferred_exit_rows: set[int] = set()
         self._rate_constant = None
+        # Position of the central atom of the event that triggered the basin, in
+        # state 0: the centre of [Basin] max_radius (None: no geometric bound)
+        self.center_position: Optional[np.ndarray] = None
+        self.max_extent = 0.0  # largest distance from the centre of a moved atom
 
     def detection(self, params) -> bool:
         """Utility method."""
         return self.detector.detection(**params)
 
-    def execute(self, system):
+    def execute(self, system, center_atom: Optional[int] = None):
         """
         run the basin exploration and select an event from a system, corresponding to the first state in the basin, it is assumed that this state is transient.
+
+        `center_atom` is the central atom of the event that triggered the basin:
+        the basin's extent, bounded by [Basin] max_radius, is measured from it.
         """
         # initialize the basin
         self._initialize(system)
+        if center_atom is not None:
+            self.center_position = np.array(system.positions[center_atom], copy=True)
         # explore the basin
         result = self.construct_connexion_table()
         if not result.is_ok():
@@ -383,6 +393,23 @@ class BasinsGenericEvents:
                             n_states, len(self.states_to_explore) - 1
                         )
                     )
+                if self.center_position is not None:
+                    extent = self._extent(new_system)
+                    self.max_extent = max(self.max_extent, extent)
+                    max_radius = self.config.basin.max_radius
+                    if max_radius > 0 and extent > max_radius:
+                        return Err(
+                            ErrorInfo(
+                                type=ErrorType.BASIN_OUTSIDE_RADIUS,
+                                message="Basin state {} has an atom moved {:.2f} A from "
+                                "the basin centre, beyond max_radius = {} A; lower "
+                                "[Basin] energy_thr if transitions that should be "
+                                "simulated explicitly are inside the basin".format(
+                                    to_explore, extent, max_radius
+                                ),
+                                variables={"state": to_explore, "extent": extent},
+                            )
+                        )
                 max_states = self.config.basin.max_states
                 if max_states > 0 and n_states >= max_states:
                     return Err(
@@ -467,11 +494,30 @@ class BasinsGenericEvents:
 
         df = self.connectivity_table.get_table()
         self._log(
-            "\t :=> Basin explored: {} states, {} exits".format(
-                len(self.states), int((~df["transient"].astype(bool)).sum())
+            "\t :=> Basin explored: {} states, {} exits{}".format(
+                len(self.states),
+                int((~df["transient"].astype(bool)).sum()),
+                ""
+                if self.center_position is None
+                else ", extent {:.2f} A".format(self.max_extent),
             )
         )
         return Ok(None)
+
+    def _extent(self, system) -> float:
+        """Largest distance from the basin centre of an atom of `system` that moved
+        by more than [Control] disp_thr from state 0 (0 if none moved)."""
+        reference = self.states[0].system.positions
+        displacement, _ = ase.geometry.find_mic(
+            system.positions - reference, system.cell, pbc=True
+        )
+        moved = np.linalg.norm(displacement, axis=1) > self.config.control.disp_thr
+        if not moved.any():
+            return 0.0
+        _, distances = ase.geometry.find_mic(
+            system.positions[moved] - self.center_position, system.cell, pbc=True
+        )
+        return float(distances.max())
 
     def _log(self, message: str) -> None:
         if self.loggers is not None:

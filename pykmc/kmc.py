@@ -341,7 +341,12 @@ class KMC:
                 self.system.update_positions(
                     result_reconstruction.ok_value().min1_positions
                 )
-                result_basin = basin.execute(self.system)
+                result_basin = basin.execute(
+                    self.system,
+                    center_atom=int(
+                        active_table.table.iloc[idx_selected_event]["atom_index"]
+                    ),
+                )
                 if basin.n_psr_skipped > 0:
                     self.loggers.info(
                         "log",
