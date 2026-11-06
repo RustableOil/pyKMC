@@ -342,6 +342,28 @@ class KMC:
                     result_reconstruction.ok_value().min1_positions
                 )
                 result_basin = basin.execute(self.system)
+                if basin.n_psr_skipped > 0:
+                    self.loggers.info(
+                        "log",
+                        "\t :=> Basin skipped {} transitions with a failed PSR match "
+                        "(up to {:.2%} of a state's outgoing rate, threshold {:.2%}).".format(
+                            basin.n_psr_skipped,
+                            basin.psr_max_rate_fraction,
+                            self.config.basin.psr_skip_rate_thr,
+                        ),
+                    )
+                if basin.deferred_exit_rows:
+                    df_basin = basin.connectivity_table.df
+                    n_exits = int((~df_basin["transient"].astype(bool)).sum())
+                    self.loggers.info(
+                        "log",
+                        "\t :=> Basin deferred the refinement of {} of {} exits with "
+                        "negligible rates (exit_refine_thr {}).".format(
+                            len(basin.deferred_exit_rows),
+                            n_exits,
+                            self.config.basin.exit_refine_thr,
+                        ),
+                    )
                 neighbors_list_before_basin = self.neighbors_list
                 basin_exit_reconstructed = False
                 # An exit that cannot be reconstructed from its refined saddle is

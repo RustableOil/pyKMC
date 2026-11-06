@@ -727,6 +727,30 @@ class BasinConfig(BaseModel):
         "costs a reconstruction of the whole system; past this number the basin is "
         "abandoned and the original event is executed. 0 removes the limit.",
     )
+    psr_skip_rate_thr: float = Field(
+        default=0.01,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Maximum fraction of a basin state's outgoing rate that transitions "
+            "dropped for a failed PSR match may carry. A failed match drops its "
+            "transition only while the dropped rate (generic rates) stays within "
+            "this fraction of the state's total outgoing rate; beyond it the basin "
+            "fails and the originally selected KMC event is applied. "
+            "0 aborts the basin on any failed match."
+        ),
+    )
+    exit_refine_thr: float = Field(
+        default=0.9999,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "Fraction of each basin state's exit rate (generic barriers, constant "
+            "prefactor) covered by the exits that are refined. The remaining exits, "
+            "with negligible rates, keep their generic barrier and are only refined "
+            "if the selector picks one. 1 refines every exit."
+        ),
+    )
 
 
 class EventRecyclingConfig(BaseModel):
