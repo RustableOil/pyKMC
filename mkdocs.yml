@@ -30,8 +30,10 @@ nav:
   - Getting Started:
       - Installation: install/installation.md
       - User Guide: user_guide.md
+      - Atomic Environment: atomic_environments.md
       - Event Recycling: recycling.md
       - HTST prefactors: htst.md
+      - Active Volumes: active_volumes.md
   - Troubleshooting: troubleshooting.md
   - KMC Parameters: parameters.md
   - Developer Guide: 
