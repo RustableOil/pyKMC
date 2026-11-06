@@ -53,9 +53,13 @@ class DetectorThreshold(Detector):
 
                 # generic event of the active one
                 # pds_generic_event_forward = df_reference_table.iloc[idx_reference_event]
-                pds_generic_event_forward = df_reference_table[
+                df_forward = df_reference_table[
                     df_reference_table["idx_ref"] == idx_reference_event
-                ].iloc[0]  # is a pd.Serie
+                ]
+                if df_forward.empty:
+                    # removed from the catalogue (failed reconstruction)
+                    return False
+                pds_generic_event_forward = df_forward.iloc[0]  # is a pd.Serie
 
             else:
                 pds_generic_event_forward = pds_selected_active_event
@@ -65,11 +69,10 @@ class DetectorThreshold(Detector):
                 df_reference_table["event_id"] == pds_generic_event_forward["id_final"]
             ]
 
-            # Should always have one (reversibility)
+            # Should always have one (reversibility), unless it was removed
+            # from the catalogue after a failed reconstruction
             if df_backward_events.empty:
-                raise ValueError(
-                    "Basin detection: No backward event for the selected active event."
-                )
+                return False
 
             # Check if at least one backward event has a low energy barrier
             dE_backward = df_backward_events["energy_barrier"].min()

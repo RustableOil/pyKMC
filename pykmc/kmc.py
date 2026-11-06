@@ -291,6 +291,9 @@ class KMC:
             events_info = info_active_events(
                 self.system.types, self.reference_table, active_table
             )
+            err_reference, err_ae = self._keep_executed_reference(
+                err_reference, err_ae, active_table, idx_selected_event
+            )
             if len(err_reference) != 0:
                 self.loggers.info(
                     "log",
@@ -508,6 +511,9 @@ class KMC:
                             len(self.active_table.table)
                         ),
                     )
+
+            # Recycled rows whose reference event was removed this step
+            self.active_table.remove_missing_references(self.reference_table)
 
             # == Update variables ==
             self.neighbors_list = NeighborsList(
@@ -901,6 +907,42 @@ class KMC:
                 self.atomic_environment,
             )
         return idx_selected_event, delta_t, ktot
+
+    def _keep_executed_reference(
+        self,
+        err_reference: list[int],
+        err_ae: list,
+        active_table: ActiveEventTable,
+        idx_selected_event: int,
+    ) -> tuple[list[int], list]:
+        """Drop from the reference events to remove those whose removal would
+        remove the executed event's reference event.
+
+        A reference event is removed together with its backward event. When the
+        same generic event (or its backward event) reconstructed for another atom
+        in the same step, the event is valid and the failure is local, e.g. a
+        refinement that converged to a point with no negative mode; removing it
+        would also leave the executed event without a reference event.
+        """
+        if len(err_reference) == 0 or len(active_table.table) == 0:
+            return err_reference, err_ae
+        executed_ref = int(
+            active_table.table.loc[idx_selected_event].at["num_reference_event"]
+        )
+        kept_reference, kept_ae = [], []
+        for ref, ae in zip(err_reference, err_ae):
+            if executed_ref in self.reference_table.with_backward_events([ref]):
+                self.loggers.info(
+                    "log",
+                    "\t :=> Keeping reference event {}: it is the executed event's "
+                    "reference event (or its backward event, {}).".format(
+                        ref, executed_ref
+                    ),
+                )
+                continue
+            kept_reference.append(ref)
+            kept_ae.append(ae)
+        return kept_reference, kept_ae
 
     def reconstruction(self, active_table):
         # TODO make a Result

@@ -776,6 +776,16 @@ class ReferenceEventTable:
             for column, (dtype, _) in self._prefactor_columns.items():
                 self.table[column] = pd.Series(dtype=dtype)
 
+    def with_backward_events(self, idx_refs: list[int]) -> set[int]:
+        """Return `idx_refs` and their backward events: what `remove` removes."""
+        idx_refs = set(idx_refs)
+        backward_refs = set(
+            self.table.loc[self.table["idx_ref"].isin(idx_refs), "idx_backward"].astype(
+                int
+            )
+        )
+        return idx_refs | backward_refs
+
     def remove(self, idx_refs: list[int]) -> None:
         """Remove events with ind == idx_ref as well as its backward event
 
@@ -785,15 +795,7 @@ class ReferenceEventTable:
             index of the event to be removed
         """
 
-        idx_refs = set(idx_refs)  # make a set if there are doublons
-
-        backward_refs = set(
-            self.table.loc[self.table["idx_ref"].isin(idx_refs), "idx_backward"].astype(
-                int
-            )
-        )  # find set idx backwards
-
-        all_refs = idx_refs | backward_refs  # all ref to remove
+        all_refs = self.with_backward_events(idx_refs)  # all ref to remove
 
         self.table = self.table[~self.table["idx_ref"].isin(all_refs)].reset_index(
             drop=True
@@ -1029,6 +1031,14 @@ class ActiveEventTable:
         """
         self.table = self.table.drop(ind)
         self.table = self.table.reset_index(drop=True)
+
+    def remove_missing_references(self, reference_table) -> None:
+        """Remove the events whose reference event is no longer in `reference_table`."""
+        if len(self.table) == 0:
+            return
+        known = self.table["num_reference_event"].isin(reference_table.table["idx_ref"])
+        if not known.all():
+            self.table = self.table[known].reset_index(drop=True)
 
     def remove_duplicates(self, cell, neighbors_list: NeighborsList = None) -> None:
         """Loop over all active events in the DataFrame, check if there are duplicates by computing delr."""
