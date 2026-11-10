@@ -584,6 +584,42 @@ class RateConstantConfig(BaseModel):
         "in MB (one 3N x 3N matrix of doubles is 8 (3N)^2 / 1e6 MB; 2047 atoms = "
         "302 MB). Up to n_sessions Hessians are built at once.",
     )
+    fill_reference_nu0: bool = Field(
+        default=False,
+        description="'htst': give a nu0 to every reference event without one (rows "
+        "of a loaded table, failed Hessians) the first time its environment is in "
+        "the system: the event is refined once on one atom of that environment "
+        "and the Hessians of the refined event set the reference nu0. Unrefined "
+        "active events take the prefactor of their reference event, so without "
+        "this they use k0 while refined ones use their own nu0.",
+    )
+    nu0_cache: bool = Field(
+        default=False,
+        description="'htst': reuse the nu0 of a refined active event for a later "
+        "refined event of the same reference event with the same refined barrier "
+        "(nu0_cache_de_thr) and the same minimum-to-saddle displacement profile "
+        "(nu0_cache_dr_thr), instead of computing its two Hessians again. The "
+        "cache is kept in nu0_cache_file across restarts.",
+    )
+    nu0_cache_file: str = Field(
+        default="./nu0_cache.pickle",
+        description="'htst', nu0_cache = True: file read at startup if present "
+        "(ignored if it was written with other Hessian settings or another "
+        "potential) and rewritten after every step.",
+    )
+    nu0_cache_de_thr: float = Field(
+        default=0.01,
+        gt=0.0,
+        description="'htst', nu0_cache = True: largest difference (eV) between the "
+        "refined barriers of two events for them to share a nu0.",
+    )
+    nu0_cache_dr_thr: float = Field(
+        default=0.05,
+        gt=0.0,
+        description="'htst', nu0_cache = True: largest difference (Angstrom) "
+        "between the 16 largest minimum-to-saddle atomic displacements of two "
+        "events (sorted) for them to share a nu0.",
+    )
 
     @model_validator(mode="before")
     @classmethod

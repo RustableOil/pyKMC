@@ -52,7 +52,8 @@ from .basins.detection import DetectorThreshold
 from .basins import BasinsGenericEvents
 from .event_recycling import DistanceRecycling, Recycling
 from .bias import Bias
-from .rate_constant import PrefactorRequest, RateConstant
+from .rate_constant import PrefactorOutcome, PrefactorRequest, RateConstant
+from .rate_constant.nu0_cache import Nu0Cache
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -108,6 +109,12 @@ class KMC:
         self.active_table: ActiveEventTable | None = None
         self._pre_exec_positions: np.ndarray | None = None
         self.bias: Bias | None = None
+        # nu0 of refined events, reused across steps ([RateConstant] nu0_cache).
+        self.nu0_cache: Nu0Cache | None = None
+        self._nu0_pending: dict = {}
+        self._nu0_followers: dict = {}
+        # reference events whose nu0 fill was attempted in this run
+        self._ref_nu0_tried: set[int] = set()
         # The recycler decides what to carry over between KMC steps at
         # end-of-step; with no recycler the active table is cleared each
         # step (same observable behavior as prior releases).
@@ -250,6 +257,12 @@ class KMC:
             self.visited_environments.update(
                 set(l_ids).difference(self.visited_environments)
             )
+            if (
+                self.rate_constant.per_event_prefactor
+                and self.config.rateconstant.fill_reference_nu0
+            ):
+                self.fill_reference_prefactors()
+
             # == Refinement ==
             ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
             subset_reference_event_table = self.reference_table.has_id_subset_table(
@@ -855,6 +868,8 @@ class KMC:
             for row in table.index
             if isinstance(table.at[row, "full_saddle"], np.ndarray)
         ]
+        if self.nu0_cache is not None:
+            rows = self._apply_nu0_cache(rows)
         requests = [
             PrefactorRequest(
                 saddle=table.at[row, "full_saddle"],
@@ -869,15 +884,22 @@ class KMC:
             for row in rows
         ]
 
-        outcomes = self.rate_constant.compute_prefactors(
-            requests, self.system, self._frozen_ids()
-        )
+        if requests or self.nu0_cache is None:
+            outcomes = self.rate_constant.compute_prefactors(
+                requests, self.system, self._frozen_ids()
+            )
+        else:  # every refined event got its nu0 from the cache
+            outcomes = []
         for row, per_direction in zip(rows, outcomes, strict=True):
+            if self.nu0_cache is not None:
+                self._cache_nu0(row, per_direction[0])
             try:
                 self.active_table.set_prefactor(row, per_direction[0])
             except RuntimeError as exc:
                 self.loggers.error("log", str(exc))
                 raise
+        if self.nu0_cache is not None:
+            self._fill_nu0_followers()
         n_pending = int(
             (self.active_table.table["prefactor_status"] == "pending").sum()
         )
@@ -888,6 +910,198 @@ class KMC:
             )
             self.loggers.error("log", msg)
             raise RuntimeError(msg)
+
+    def fill_reference_prefactors(self) -> None:
+        """Give a nu0 to the reference events present now that have none.
+
+        A reference row has no nu0 when it was loaded from a table written
+        without one, or its Hessians failed. Unrefined active events take the
+        prefactor of their reference event, so such a row would make them use k0.
+        Each such row whose environment is in the system is refined once, on the
+        first atom with that environment and its first symmetry image, and the
+        Hessians of the refined event (from the current minimum) set its nu0.
+        Each row is tried once per run; a row still without nu0 keeps k0.
+        """
+        table = self.reference_table.table
+        prefactor = pd.to_numeric(table["prefactor"], errors="coerce")
+        present = set(self.atomic_environment.atomic_environment_list)
+        missing = table[
+            table["event_id"].isin(present)
+            & ~np.isfinite(prefactor)
+            & ~table["idx_ref"].astype(int).isin(self._ref_nu0_tried)
+        ]
+        if len(missing) == 0:
+            return
+        self.loggers.info(
+            "log",
+            f"\t :=> Computing nu0 of {len(missing)} reference events without one",
+        )
+        refinement = Refinement(
+            self.config,
+            self.loggers,
+            self.system,
+            self.neighbors_list,
+            self.atomic_environment,
+            self.manager,
+            self.rate_constant,
+        )
+        jobs = []  # (idx_ref, atom, reference barrier, future)
+        for _, dfevent in missing.iterrows():
+            idx_ref = int(dfevent["idx_ref"])
+            self._ref_nu0_tried.add(idx_ref)
+            atoms = self.atomic_environment.get_atoms_with_id(dfevent["event_id"])
+            if len(atoms) == 0:
+                continue
+            at_idx = int(atoms[0])
+            one_image = dfevent.copy()
+            one_image["sym_matrix"] = [dfevent["sym_matrix"][0]]
+            one_image["sym_perm"] = [dfevent["sym_perm"][0]]
+            futures = refinement.refine_single(
+                at_idx, one_image, self.total_energy, {}, e_thr=np.inf, k_thr=None
+            )
+            future = futures[0] if isinstance(futures, list) else futures
+            jobs.append((idx_ref, at_idx, float(dfevent["energy_barrier"]), future))
+
+        requests, request_refs, failed = [], [], []
+        refined_barriers = []
+        for idx_ref, at_idx, barrier, future in jobs:
+            res = future.result()
+            if not res.is_ok() or res.ok_value().refined != "T":
+                failed.append((idx_ref, "refinement_failed", "refinement failed"))
+                continue
+            output = res.ok_value()
+            dE = (
+                output.E_saddle
+                if self.config.control.active_volume
+                else output.E_saddle - self.total_energy
+            )
+            if abs(dE - barrier) > self.config.eventsearch.refined_energy_thr:
+                failed.append(
+                    (
+                        idx_ref,
+                        "refined_other_saddle",
+                        f"refined barrier {dE:.4f} eV, reference {barrier:.4f} eV",
+                    )
+                )
+                continue
+            requests.append(
+                PrefactorRequest(
+                    saddle=output.saddle_positions,
+                    minima=[self.system.positions.copy()],
+                    centre=at_idx,
+                    reference=True,
+                    names=[f"reference event {idx_ref} (refined on atom {at_idx})"],
+                )
+            )
+            request_refs.append(idx_ref)
+            refined_barriers.append(float(dE))
+
+        outcomes = (
+            self.rate_constant.compute_prefactors(
+                requests, self.system, self._frozen_ids()
+            )
+            if requests
+            else []
+        )
+        settings = self.rate_constant.settings_record
+        n_ok = 0
+        for idx_ref, dE, request, per_direction in zip(
+            request_refs, refined_barriers, requests, outcomes, strict=True
+        ):
+            outcome = per_direction[0]
+            self.reference_table.set_prefactor(idx_ref, outcome, settings)
+            if outcome.status != "ok":
+                continue
+            n_ok += 1
+            if self.nu0_cache is not None:
+                # the refined events of this reference reuse these Hessians
+                row = table.loc[table["idx_ref"] == idx_ref].iloc[0]
+                key = tuple(
+                    str(row[c]) for c in ("event_id", "id_saddle", "id_final")
+                )
+                profile = self.nu0_cache.profile(
+                    request.minima[0], request.saddle, self.system.cell
+                )
+                self.nu0_cache.add(key, dE, profile, float(outcome.value))
+        for idx_ref, status, why in failed:
+            self.loggers.warning(
+                "log", f"HTST: reference event {idx_ref} keeps k0: {why}."
+            )
+            self.reference_table.set_prefactor(
+                idx_ref, PrefactorOutcome(None, status), settings
+            )
+        self.loggers.info(
+            "log",
+            f"\t :=> nu0 set for {n_ok} of {len(missing)} reference events",
+        )
+
+    def _apply_nu0_cache(self, rows: list) -> list:
+        """Give cached nu0 to the refined rows that match, and return the rest.
+
+        A row with no cached match whose event matches an earlier row of this
+        step waits for that row's nu0 (`_fill_nu0_followers`) instead of
+        computing its own. Only the returned rows have their Hessians computed.
+        """
+        cache = self.nu0_cache
+        table = self.active_table.table
+        ref = self.reference_table.table.set_index("idx_ref")
+        self._nu0_pending, self._nu0_followers = {}, {}
+        batch = Nu0Cache(de_thr=cache.de_thr, dr_thr=cache.dr_thr,
+                         n_profile=cache.n_profile)
+        to_compute, n_hit = [], 0
+        for row in rows:
+            idx_ref = int(table.at[row, "num_reference_event"])
+            if idx_ref not in ref.index:
+                to_compute.append(row)
+                continue
+            key = tuple(
+                str(ref.at[idx_ref, column])
+                for column in ("event_id", "id_saddle", "id_final")
+            )
+            dE = float(table.at[row, "energy_barrier"])
+            profile = cache.profile(
+                self.system.positions, table.at[row, "full_saddle"], self.system.cell
+            )
+            nu0 = cache.lookup(key, dE, profile)
+            if nu0 is not None:
+                self.active_table.set_prefactor(row, PrefactorOutcome(nu0, "ok"))
+                n_hit += 1
+                continue
+            leader = batch.lookup(key, dE, profile)
+            if leader is not None:  # nu0 field holds the leader's row label
+                self._nu0_followers[row] = int(leader)
+                continue
+            batch.add(key, dE, profile, row)
+            self._nu0_pending[row] = (key, dE, profile)
+            to_compute.append(row)
+        self.loggers.info(
+            "log",
+            f"HTST: nu0 cache: {n_hit} of {len(rows)} refined active events reused "
+            f"a cached nu0, {len(self._nu0_followers)} share the nu0 of an "
+            f"equivalent event of this step, {len(to_compute)} computed "
+            f"({len(cache)} cached events).",
+        )
+        return to_compute
+
+    def _cache_nu0(self, row, outcome: PrefactorOutcome) -> None:
+        """Cache the nu0 just computed for a row (only an 'ok' value)."""
+        pending = self._nu0_pending.pop(row, None)
+        if pending is None or outcome.status != "ok" or outcome.value is None:
+            return
+        key, dE, profile = pending
+        self.nu0_cache.add(key, dE, profile, float(outcome.value))
+
+    def _fill_nu0_followers(self) -> None:
+        """Give each follower row the outcome computed for its leader row."""
+        table = self.active_table.table
+        for row, leader in self._nu0_followers.items():
+            value = table.at[leader, "prefactor"]
+            outcome = PrefactorOutcome(
+                None if not np.isfinite(value) else float(value),
+                table.at[leader, "prefactor_status"],
+            )
+            self.active_table.set_prefactor(row, outcome)
+        self._nu0_pending, self._nu0_followers = {}, {}
 
     def _frozen_ids(self) -> np.ndarray:
         """Return the indices of the frozen atoms (none without [frozen_atoms])."""
@@ -1194,6 +1408,8 @@ class KMC:
         self.reference_table.save(self.config.control.reference_table_output)
         with open(self.config.control.visited_environments_output, "wb") as file:
             pickle.dump(self.visited_environments, file)
+        if self.nu0_cache is not None:
+            self.nu0_cache.save(self.config.rateconstant.nu0_cache_file)
 
     def _save_restart_file(self, last_step, last_time):
         """

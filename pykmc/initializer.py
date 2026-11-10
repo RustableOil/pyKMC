@@ -15,6 +15,8 @@ from .atomic_environment import AtomicEnvironment
 from .event_table import ReferenceEventTable
 from .bias import DirectionBias, PointBias, TopoBias
 import pickle
+import os
+from .rate_constant.nu0_cache import Nu0Cache
 
 
 class Initializer:
@@ -39,6 +41,7 @@ class Initializer:
         self.initialize_neighbors_list()
         self.initialize_atomic_environments()
         self.initialize_reference_table()
+        self.initialize_nu0_cache()
         self._initialize_visited_environments()
         self.initialize_bias()
 
@@ -108,6 +111,41 @@ class Initializer:
         self.kmc.rate_constant.setup(
             self.kmc.config, self.kmc.manager, self.kmc.system, self.kmc.loggers
         )
+
+    def initialize_nu0_cache(self) -> None:
+        """Create the nu0 cache of refined events, and read its file if present."""
+        rc = self.kmc.config.rateconstant
+        if not (rc.nu0_cache and self.kmc.rate_constant.per_event_prefactor):
+            if rc.nu0_cache:
+                self.kmc.loggers.warning(
+                    "log",
+                    f"HTST: nu0_cache = True is ignored with style = {rc.style}.",
+                )
+            return
+        lammps = self.kmc.config.lammps
+        signature = (
+            f"{self.kmc.rate_constant.settings_record}; fd_step={rc.fd_step:g}; "
+            f"pair_style {lammps.pair_style}; pair_coeff {lammps.pair_coeff}"
+        )
+        cache = Nu0Cache(
+            de_thr=rc.nu0_cache_de_thr, dr_thr=rc.nu0_cache_dr_thr, signature=signature
+        )
+        loaded, why = cache.load(rc.nu0_cache_file)
+        if loaded:
+            self.kmc.loggers.info(
+                "log",
+                f"HTST: nu0 cache: read {len(cache)} refined events from "
+                f"{rc.nu0_cache_file}.",
+            )
+        elif os.path.exists(rc.nu0_cache_file):
+            self.kmc.loggers.warning(
+                "log", f"HTST: nu0 cache starts empty: {why}; it will be overwritten."
+            )
+        else:
+            self.kmc.loggers.info(
+                "log", f"HTST: nu0 cache starts empty; written to {rc.nu0_cache_file}."
+            )
+        self.kmc.nu0_cache = cache
 
     def initialize_neighbors_list(self) -> None:
         """Construct a new Neighbors List."""
