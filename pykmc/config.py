@@ -115,6 +115,35 @@ class ControlConfig(BaseModel):
         description="Maximum physical (simulated) time in ps. If set, the simulation stops once this value is reached. Defaults to None (no time limit).",
     )
 
+    checkpoint: Optional[bool] = Field(
+        default=True,
+        description="Write restart_output after the initial minimization and at the end of every KMC step "
+        "(step, time, wall time, positions and the sizes of the output files), so that a run "
+        "stopped at any point (e.g. at the wall-time limit of a batch job) can be restarted "
+        "from its last completed step.",
+    )
+
+    restart_output: Optional[str] = Field(
+        default="./restart.npz",
+        description="Checkpoint file written when checkpoint = True. Written atomically.",
+    )
+
+    resume: Optional[bool] = Field(
+        default=False,
+        description="Resume automatically, for chains of batch jobs that run the same input. "
+        "If done_file exists the run exits at once. Otherwise, if restart_output exists, the run "
+        "continues from it: restart_file, the reference table and visited environments outputs "
+        "are used, and n_steps is the TOTAL number of steps (the remaining ones are run). "
+        "Without restart_output the run starts fresh and the previous output files "
+        "(pykmc.out/.events/.info, trajectory) are removed. done_file is written when the "
+        "run ends normally (n_steps, max_physical_time or only crystalline environments).",
+    )
+
+    done_file: Optional[str] = Field(
+        default="./DONE",
+        description="With resume = True: file written when the run has finished.",
+    )
+
 
 class AtomicEnvironmentConfig(BaseModel):
     """Atomic environments parameters."""

@@ -302,14 +302,35 @@ n_steps = 100
 engine = lammps
 ``` 
 
-On restart:
+On restart (without `resume`):
 
 - `n_steps` is the number of **additional** steps to run. In the example above, the simulation continues from step 101 to step 200.
 - The step counter, the simulated time and the wall time continue from the values in the restart file.
 - The system is not minimized again: the positions read from `initial_config` are kept as they are.
 - The trajectory and output files are appended to instead of being overwritten.
 
-_A restart file is written only when all `n_steps` steps are completed. It is not written if the simulation stops earlier._
+With `checkpoint = True` (the default), pyKMC also writes `restart.npz` (`restart_output`) after the initial minimization and at the end of every step. It holds the positions too, and the sizes of `pykmc.out`, `pykmc.events`, `pykmc.info` and the trajectory at that moment. Restarting from it (`restart_file = restart.npz`) works after a run was killed at any point: the output files are cut back to the checkpointed step, which removes the lines of an interrupted step, and the positions are taken from the checkpoint rather than from `initial_config`. The reference table and the visited environments are written atomically, so a kill never leaves them half-written.
+
+### Batch jobs with a wall-time limit: `resume = True`
+
+For a run longer than the wall-time limit of a cluster, set `resume = True` and submit the same job script several times in a row, e.g. as a Slurm array that runs one task at a time (`sbatch --array=1-10%1 run.sh`) or as a chain of dependent jobs (`--dependency=afterany:<jobid>`). No input file needs to change between jobs:
+
+```INI
+[Control]
+initial_config = start.xyz
+reference_table = reference_table.pickle
+visited_environments = visited_environments.pickle
+n_steps = 5000        # total number of steps of the whole run
+resume = True
+```
+
+Each job:
+
+- exits at once if `DONE` (`done_file`) exists;
+- otherwise continues from `restart.npz` if it exists: `restart_file`, the reference table and visited environments outputs are used, and only the remaining `n_steps - last_step` steps are run;
+- otherwise starts fresh (output files of an earlier attempt that died before its first checkpoint are removed).
+
+`DONE` is written when the run ends normally: after `n_steps` steps, at `max_physical_time`, or when only crystalline environments are left. A job killed at the wall-time limit loses at most the step in progress.
 
 ## Running a simulation
 

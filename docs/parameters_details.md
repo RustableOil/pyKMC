@@ -32,6 +32,22 @@
   <details><summary>Description</summary>
   File with restart informations.
   </details>
+- **`checkpoint`** : `bool`, default = `True`
+  <details><summary>Description</summary>
+  Write `restart_output` after the initial minimization and at the end of every KMC step (step, time, wall time, positions and the sizes of the output files), so that a run stopped at any point (e.g. at the wall-time limit of a batch job) can be restarted from its last completed step.
+  </details>
+- **`restart_output`** : `str`, default = `./restart.npz`
+  <details><summary>Description</summary>
+  Checkpoint file written when `checkpoint = True`. Written atomically.
+  </details>
+- **`resume`** : `bool`, default = `False`
+  <details><summary>Description</summary>
+  Resume automatically, for chains of batch jobs that run the same input. If `done_file` exists the run exits at once. Otherwise, if `restart_output` exists, the run continues from it, and `n_steps` is then the TOTAL number of steps. Without `restart_output` the run starts fresh. See "How to restart a simulation" in the user guide.
+  </details>
+- **`done_file`** : `str`, default = `./DONE`
+  <details><summary>Description</summary>
+  With `resume = True`: file written when the run has finished (`n_steps`, `max_physical_time` or only crystalline environments).
+  </details>
 - **`reconstruction`** : `bool`, default = `True`
   <details><summary>Description</summary>
   If at each KMC step we reconstruct generic events.

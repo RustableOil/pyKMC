@@ -39,6 +39,9 @@ class _FakeManager:
     def set_all_positions(self, positions: Optional[np.ndarray] = None) -> None:
         """Pretend to broadcast positions to the engines."""
 
+    def broadcast(self, *args: Any, **kwargs: Any) -> None:
+        """Pretend to broadcast an operation to every engine."""
+
     def close_all(self) -> None:
         """Pretend to shut the pool down."""
 
@@ -54,6 +57,7 @@ class _RecordingLoggers:
 
     def __init__(self) -> None:
         self.step_lines: list[dict[str, Any]] = []
+        self._start_wall_time = 0.0  # read by the checkpoint
 
     def info(self, *args: Any, **kwargs: Any) -> None:
         """Swallow info messages."""
@@ -85,6 +89,7 @@ class _RecordingLoggers:
         disp_tot: float,
         n_moved: int,
         step_wall_time: float,
+        work: Any = None,
     ) -> None:
         """Record the step line exactly as ``KMC.run`` evaluated it."""
         self.step_lines.append(
@@ -93,6 +98,7 @@ class _RecordingLoggers:
                 "num_reference_event": num_reference_event,
                 "energy_barrier": energy_barrier,
                 "k": k_event,
+                "work": work,
             }
         )
 
@@ -206,6 +212,12 @@ def test_step_log_reads_executed_row_before_prune(
     line = sim.loggers.step_lines[0]
     assert line["num_reference_event"] == ref_idx
     assert line["energy_barrier"] == pytest.approx(0.5)
+
+    # The step's work and the checkpoint of the completed step
+    assert line["work"]["n_refine"] == 0 and line["work"]["t_basin"] == 0.0
+    with np.load(tmp_path / "restart.npz") as info:
+        assert int(info["last_step"]) == 1
+        assert info["positions"].shape == np.asarray(system_Cu.positions).shape
 
     # The prune still ran after the log: with no recycler attached the
     # persistent active table is cleared for the next step.

@@ -1,6 +1,7 @@
 from .session import Session
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+import collections
 import queue
 import threading
 from typing import Any, Literal
@@ -40,6 +41,9 @@ class Manager:
         self._local_threads: list[threading.Thread] = []
 
         self.mode: Literal["local", "group", "global"] = "local"
+        # Operations submitted since the start, by name (all modes); the KMC loop
+        # reports the per-step differences (searches, refinements, prefactors)
+        self.op_counts: collections.Counter[str] = collections.Counter()
 
     def start(self) -> None:
         """Start one thread per local session. Must be called before submit().
@@ -165,6 +169,7 @@ class Manager:
         if self.mode != "local":
             self._use_local()
         job = Job(op_name=op_name, kwargs=kwargs)
+        self.op_counts[op_name] += 1
         self._local_queue.put(job)
         return job.future
 
@@ -188,6 +193,7 @@ class Manager:
             raise RuntimeError("No group session configured.")
         if self.mode != "group":
             self._use_group()
+        self.op_counts[op_name] += 1
         return self.group_session.call(op_name, **kwargs)
 
     def submit_global(self, op_name: str, **kwargs) -> Any:
@@ -209,6 +215,7 @@ class Manager:
             raise RuntimeError("No global session configured.")
         if self.mode != "global":
             self._use_global()
+        self.op_counts[op_name] += 1
         return self.global_session.call(op_name, **kwargs)
 
     def __getattr__(self, name: str):

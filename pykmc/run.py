@@ -5,6 +5,7 @@ from an input file, initializes the KMC simulation, and runs it.
 """
 
 import argparse
+import os
 import sys
 import traceback
 from mpi4py import MPI
@@ -12,6 +13,7 @@ from .kmc import KMC
 from pykmc.factory import EngineManagerFactory
 from .config import Config
 from .rate_constant import RateConstant
+from .resume import apply_resume, remove_stale_outputs, write_done
 
 
 def main() -> None:
@@ -28,6 +30,19 @@ def main() -> None:
     # Config
     config = Config.from_ini_file(args.input)
     comm = MPI.COMM_WORLD
+    # [Control] resume: continue from the checkpoint, or stop if already finished
+    finished = apply_resume(config)
+    if finished is not None:
+        if comm.Get_rank() == 0:
+            print(finished)
+            if not os.path.exists(config.control.done_file):
+                write_done(config.control.done_file, finished)
+        return
+    if comm.Get_rank() == 0:
+        removed = remove_stale_outputs(config)
+        if removed:
+            print("resume: no checkpoint, fresh start; removed " + ", ".join(removed))
+    comm.Barrier()
     group_size = (
         (comm.Get_size() - 1)
         if config.control.group_size == -1

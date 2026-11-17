@@ -54,6 +54,7 @@ from .event_recycling import DistanceRecycling, Recycling
 from .bias import Bias
 from .rate_constant import PrefactorOutcome, PrefactorRequest, RateConstant
 from .rate_constant.nu0_cache import Nu0Cache
+from .resume import atomic_pickle, output_files, write_checkpoint, write_done
 
 
 # NOTE can maybe reimplment tries if empty catalog
@@ -173,6 +174,7 @@ class KMC:
             self._append_snapshot_to_trajectory()
             last_step = 0
             total_time = 0.0
+            self._write_checkpoint(last_step, total_time)
 
         else:  # read restart file
             self.loggers.info("log", ":=> Reading restart file")
@@ -202,6 +204,9 @@ class KMC:
         # KMC LOOP
         for step in range(last_step, nkmc_steps + last_step):
             start_real = time.time()
+            ops_start = self._op_counts()
+            t_basin = 0.0
+            t_nu0 = 0.0
             # Positions at the end of the previous step, for the displacement output
             step_start_positions = self.system.positions.copy()
 
@@ -230,6 +235,7 @@ class KMC:
             )
 
             ##=>Perform event search on each atom in central_atom_research_list
+            t0 = time.time()
             event_search = self.execute_event_searches(central_atom_research_list)
 
             # == ADD NEW GENERIC EVENTS TO REFERENCE EVENT TABLE ==
@@ -242,7 +248,9 @@ class KMC:
                 ]
             results_is_valid_events = self.add_reference_events(search_results)
             if self.rate_constant.per_event_prefactor:
+                t1 = time.time()
                 self.add_reference_prefactors(search_results, results_is_valid_events)
+                t_nu0 += time.time() - t1
 
             ##=>Close simulation if no events in the reference table
             if len(self.reference_table.table) == 0:
@@ -261,9 +269,13 @@ class KMC:
                 self.rate_constant.per_event_prefactor
                 and self.config.rateconstant.fill_reference_nu0
             ):
+                t1 = time.time()
                 self.fill_reference_prefactors()
+                t_nu0 += time.time() - t1
+            t_search = time.time() - t0 - t_nu0
 
             # == Refinement ==
+            t0 = time.time()
             ##=>Subset of reference_event_table with generic event that can be apply to the current step (ie event_id in atomic environment)
             subset_reference_event_table = self.reference_table.has_id_subset_table(
                 self.atomic_environment.atomic_environment_list
@@ -290,7 +302,13 @@ class KMC:
                 ),
             )
             if self.rate_constant.per_event_prefactor:
+                t1 = time.time()
                 self.add_active_prefactors()
+                t_nu0_active = time.time() - t1
+                t_nu0 += t_nu0_active
+            else:
+                t_nu0_active = 0.0
+            t_refine = time.time() - t0 - t_nu0_active
 
             # == Update System ==
             (
@@ -341,6 +359,7 @@ class KMC:
                 self.config.basin.energy_thr,
                 True,
             ):
+                t0_basin = time.time()
                 self.loggers.info("log", "\t :=> System is in a Basin.")
                 self.loggers.info("log", "\t :=> Exploring the Basin.")
                 # get basin info/explore
@@ -469,6 +488,7 @@ class KMC:
                 # Basin super-event spans many atoms; recycling is deferred (the
                 # prune below runs with the recycler detached).
                 prune_detach_recycler = True
+                t_basin = time.time() - t0_basin
             else:
                 self.system.update_positions(
                     result_reconstruction.ok_value().min2_positions
@@ -523,6 +543,7 @@ class KMC:
                 step_disp[moved].sum(),
                 int(moved.sum()),
                 elapsed_real,
+                work=self._step_work(ops_start, t_search, t_refine, t_nu0, t_basin),
             )
 
             # == Event recycling: prune the active table for the next step ==
@@ -594,13 +615,15 @@ class KMC:
             # == Save Reference Table and List visited environment :
             self._save()
             self._append_snapshot_to_trajectory()
+            # Last write of the step: a run stopped from here on restarts after it
+            self._write_checkpoint(step, total_time)
             del active_table
             # == Check if only cristalline environments ==
             if set(list(self.atomic_environment.atomic_environment_list)) == {
                 "crystal"
             }:
                 self.loggers.info("log", ":=> Only atoms with cristalline environment")
-                self._close()
+                self._finish(step, "only crystalline environments")
             if (
                 self.config.control.max_physical_time is not None
                 and self.config.control.max_physical_time * 1e-12 <= total_time
@@ -611,9 +634,9 @@ class KMC:
                         self.config.control.max_physical_time
                     ),
                 )
-                self._close()
+                self._finish(step, "max_physical_time reached")
         self._save_restart_file(step, total_time)
-        self._close()
+        self._finish(step, "n_steps completed")
 
     def get_new_environments(self) -> list[str]:
         """Get atomic environments of the current system that has not been already explored.
@@ -1404,10 +1427,13 @@ class KMC:
         write(self.config.control.trajectory_output, atoms, append=True)
 
     def _save(self) -> None:
-        """Save the reference event table and the list of visited environments."""
+        """Save the reference event table and the list of visited environments
+        (atomically: a run killed mid-write keeps the previous files)."""
         self.reference_table.save(self.config.control.reference_table_output)
-        with open(self.config.control.visited_environments_output, "wb") as file:
-            pickle.dump(self.visited_environments, file)
+        atomic_pickle(
+            self.visited_environments,
+            self.config.control.visited_environments_output,
+        )
         if self.nu0_cache is not None:
             self.nu0_cache.save(self.config.rateconstant.nu0_cache_file)
 
@@ -1420,7 +1446,47 @@ class KMC:
             last_step=last_step,
             last_time=last_time,
             total_wall_time=time.perf_counter() - self.loggers._start_wall_time,
+            positions=np.asarray(self.system.positions, float),
         )
+
+    def _op_counts(self) -> dict:
+        """Engine operations submitted so far (see Manager.op_counts)."""
+        return dict(getattr(self.manager, "op_counts", None) or {})
+
+    def _step_work(self, ops_start, t_search, t_refine, t_nu0, t_basin) -> dict:
+        """Work of the current step for the pykmc.out columns."""
+        now = self._op_counts()
+        diff = {k: now.get(k, 0) - ops_start.get(k, 0) for k in now}
+        return {
+            "n_search": diff.get("partn_search", 0),
+            "n_refine": diff.get("partn_refine", 0),
+            "n_nu0": diff.get("compute_htst_prefactors", 0),
+            "t_search": t_search,
+            "t_refine": t_refine,
+            "t_nu0": t_nu0,
+            "t_basin": t_basin,
+        }
+
+    def _write_checkpoint(self, last_step, last_time) -> None:
+        """Checkpoint after a completed step ([Control] checkpoint), see pykmc.resume."""
+        if not self.config.control.checkpoint:
+            return
+        write_checkpoint(
+            self.config.control.restart_output,
+            last_step,
+            last_time,
+            time.perf_counter() - self.loggers._start_wall_time,
+            self.system.positions,
+            output_files(self.config),
+        )
+
+    def _finish(self, last_step, reason: str) -> None:
+        """Normal end of the run: with [Control] resume, mark it finished."""
+        if self.config.control.resume:
+            write_done(
+                self.config.control.done_file, f"{reason} at step {last_step}"
+            )
+        self._close()
 
     def _close(self) -> None:
         """Close the simulation."""

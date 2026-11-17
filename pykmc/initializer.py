@@ -16,6 +16,8 @@ from .event_table import ReferenceEventTable
 from .bias import DirectionBias, PointBias, TopoBias
 import pickle
 import os
+import numpy as np
+from .resume import truncate_outputs
 from .rate_constant.nu0_cache import Nu0Cache
 
 
@@ -34,6 +36,7 @@ class Initializer:
 
     def initialize(self) -> None:
         """Initialize the entire KMC object before starting the simulation."""
+        self._cut_outputs_to_checkpoint()
         self.initialize_loggers()
         self.initialize_system()
         self.initialize_engine()
@@ -56,6 +59,19 @@ class Initializer:
             )
         else:
             self.kmc.loggers.info("log", ":=> Restarting")
+
+    def _restart_info(self):
+        path = self.kmc.config.control.restart_file
+        if path is None:
+            return None
+        with np.load(path) as info:
+            return {k: info[k] for k in info.files}
+
+    def _cut_outputs_to_checkpoint(self) -> None:
+        """On restart, cut the output files back to the sizes stored in the
+        checkpoint: removes the lines of a step that was interrupted."""
+        info = self._restart_info()
+        self._cut_files = truncate_outputs(info) if info is not None else []
 
     def initialize_loggers(self) -> None:
         """Initialize the loggers and create their files."""
@@ -81,6 +97,27 @@ class Initializer:
         self.kmc.system = System.create_from_file(
             self.kmc.config.control.initial_config
         )
+        info = self._restart_info()
+        if info is not None and "positions" in info:
+            if info["positions"].shape != self.kmc.system.positions.shape:
+                raise ValueError(
+                    "restart file positions do not match initial_config "
+                    f"({info['positions'].shape} vs {self.kmc.system.positions.shape})"
+                )
+            self.kmc.system.update_positions(info["positions"])
+            self.kmc.loggers.info(
+                "log",
+                ":=> Positions read from restart file {}".format(
+                    self.kmc.config.control.restart_file
+                ),
+            )
+        if getattr(self, "_cut_files", None):
+            self.kmc.loggers.info(
+                "log",
+                ":=> Cut back to the restart step (interrupted step removed): {}".format(
+                    ", ".join(self._cut_files)
+                ),
+            )
 
     def initialize_engine(self) -> None:
         """Start and initialize the engine workers (local and group)."""

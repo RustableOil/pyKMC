@@ -447,6 +447,13 @@ class LogKMC(LogManager):
         ("dWall(s)", 10, "{:<10.2f}"),
         ("Wall(s)", 12, "{:<12.2f}"),
         ("CPU(s)", 12, "{:<12.2f}"),
+        ("Nsrch", 6, "{:<6d}"),
+        ("Nref", 6, "{:<6d}"),
+        ("Nnu0", 6, "{:<6d}"),
+        ("tSrch(s)", 9, "{:<9.1f}"),
+        ("tRef(s)", 9, "{:<9.1f}"),
+        ("tNu0(s)", 9, "{:<9.1f}"),
+        ("tBasin(s)", 10, "{:<10.1f}"),
     )
 
     def output_file_header(self, logger_name: str, disp_thr: float = 0.05) -> None:
@@ -507,6 +514,37 @@ class LogKMC(LogManager):
                 self._n_cpus
             ),
         )
+        self.info(
+            logger_name,
+            "#   Nsrch       : Event searches run in this step (pARTn searches).",
+        )
+        self.info(
+            logger_name,
+            "#   Nref        : Event refinements run in this step (pARTn refinements, "
+            "including those of basin exits).",
+        )
+        self.info(
+            logger_name,
+            "#   Nnu0        : HTST prefactor calculations run in this step.",
+        )
+        self.info(
+            logger_name,
+            "#   tSrch(s)    : Wall time of the event searches and of adding their "
+            "events to the reference table.",
+        )
+        self.info(
+            logger_name,
+            "#   tRef(s)     : Wall time of the refinements of the applicable events.",
+        )
+        self.info(
+            logger_name,
+            "#   tNu0(s)     : Wall time of the HTST prefactors (reference and active "
+            "events, outside basins).",
+        )
+        self.info(
+            logger_name,
+            "#   tBasin(s)   : Wall time of the basin exploration and exit reconstruction.",
+        )
         self.new_line(logger_name)
         # First line of the table
         header = " ".join(
@@ -530,6 +568,7 @@ class LogKMC(LogManager):
         disp_tot: float | None = None,
         n_moved: int | None = None,
         step_wall_time: float | None = None,
+        work: dict | None = None,
     ) -> None:
         """Write a formatted line of simulation output values into the output table.
 
@@ -564,6 +603,9 @@ class LogKMC(LogManager):
             Number of atoms displaced by more than the threshold.
         step_wall_time : float, optional
             Wall time of this step (s).
+        work : dict, optional
+            Work done in this step: n_search, n_refine, n_nu0 and the wall times
+            t_search, t_refine, t_nu0, t_basin (s).
 
         """
         total_wall_time = time.perf_counter() - self._start_wall_time
@@ -582,6 +624,18 @@ class LogKMC(LogManager):
             step_wall_time,
             total_wall_time,
             total_wall_time * self._n_cpus,
+            *(
+                (work or {}).get(key)
+                for key in (
+                    "n_search",
+                    "n_refine",
+                    "n_nu0",
+                    "t_search",
+                    "t_refine",
+                    "t_nu0",
+                    "t_basin",
+                )
+            ),
         )
         formatted_values = [
             fmt.format(v) if v is not None else " " * width

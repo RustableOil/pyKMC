@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import os
+
 import pandas as pd
 from .rate_constant import PrefactorOutcome, RateConstant
 from .config import Config
@@ -808,9 +810,14 @@ class ReferenceEventTable:
         ----------
         outfile : str, optional
             path to the output file, by default 'reference_table.pickle'.
+            Written through a temporary file, so a crash mid-write keeps the
+            old file.
 
         """
-        self.table.to_pickle(outfile)
+        tmp = f"{outfile}.tmp"
+        with open(tmp, "wb") as f:
+            self.table.to_pickle(f)
+        os.replace(tmp, outfile)
 
 
 class ActiveEventTable:
